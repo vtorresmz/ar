@@ -45,11 +45,11 @@
     </div>
 
     <a-scene
-      embedded
-      vr-mode-ui="enabled: false"
-      renderer="logarithmicDepthBuffer: true;"
-      arjs="sourceType: webcam; debugUIEnabled: false;"
-    >
+  embedded
+  vr-mode-ui="enabled: false"
+  renderer="antialias: true; alpha: true;"
+  arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;">
+
       <!-- 📷 Marcador HIRO -->
       <a-marker preset="hiro">
         <!-- 📌 Imagen cargada como plano 2D -->
