@@ -1,28 +1,44 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Imagen en RA</title>
-    <script src="js/aframe.min.js"></script>
-    <script src="js/aframe-ar.min.js"></script>
-  </head>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Realidad Aumentada Local</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <body style="margin: 0; overflow: hidden;">
-    <a-scene
-      embedded
-      arjs="sourceType: webcam; debugUIEnabled: false;"
-    >
-      <a-marker preset="hiro">
-        <!-- Aquí se muestra tu imagen como una especie de panel flotante -->
-        <a-plane
-          src="csg.jpeg"
-          height="1"
-          width="1"
-          position="0 0.5 0"
-          rotation="-90 0 0"
-        ></a-plane>
-      </a-marker>
-      <a-entity camera></a-entity>
-    </a-scene>
-  </body>
+  <!-- Librerías locales -->
+  <script src="js/aframe.min.js"></script>
+  <script src="js/aframe-ar.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #000;
+    }
+  </style>
+</head>
+
+<body>
+  <a-scene
+    embedded
+    arjs="sourceType: webcam; debugUIEnabled: false;"
+    vr-mode-ui="enabled: false"
+    renderer="logarithmicDepthBuffer: true;"
+  >
+
+    <!-- Marcador HIRO -->
+    <a-marker preset="hiro">
+      <!-- Imagen flotando en RA (reemplazá con la tuya si querés) -->
+      <a-plane
+        src="https://upload.wikimedia.org/wikipedia/commons/thumb/3/38/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/440px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg"
+        width="1"
+        height="0.75"
+        rotation="-90 0 0"
+        position="0 0.5 0"
+      ></a-plane>
+    </a-marker>
+
+    <a-entity camera></a-entity>
+  </a-scene>
+</body>
 </html>
