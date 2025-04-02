@@ -39,20 +39,26 @@
   </head>
 
   <body>
-    <!-- Pantalla de carga (opcional) -->
     <div class="arjs-loader">
-      <div>Cargando cámara... no pestañees</div>
+      <div>Cargando cámara...</div>
     </div>
 
-    <a-scene
-  embedded
-  vr-mode-ui="enabled: false"
-  renderer="antialias: true; alpha: true;"
-  arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;">
+    <script>
+      window.onload = () => {
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        if (isIOS) {
+          alert("Estás usando Safari en iOS. Si la imagen no se muestra, intentá recargar.");
+        }
+      };
+    </script>
 
-      <!-- 📷 Marcador HIRO -->
+    <a-scene
+      embedded
+      vr-mode-ui="enabled: false"
+      renderer="antialias: true; alpha: true;"
+      arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
+    >
       <a-marker preset="hiro">
-        <!-- 📌 Imagen cargada como plano 2D -->
         <a-plane
           src="csg.jpeg"
           width="1"
