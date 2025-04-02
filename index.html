@@ -2,19 +2,34 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <title>Realidad Aumentada - Imagen</title>
+    <title>RA Fallback iOS Friendly</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <!-- 🧠 Versión correcta de A-Frame y AR.js -->
-  <!-- Librerías locales -->
-  <script src="js/aframe.min.js"></script>
-  <script src="js/aframe-ar.min.js"></script>
+    <!-- Librerías estándar -->
+    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.5/aframe/build/aframe-ar.js"></script>
 
     <style>
       body {
         margin: 0;
         overflow: hidden;
         background-color: #000;
+        font-family: sans-serif;
+      }
+
+      .fallback {
+        display: none;
+        padding: 2rem;
+        text-align: center;
+        color: white;
+        background-color: #111;
+      }
+
+      .fallback img {
+        width: 80%;
+        max-width: 400px;
+        margin-top: 1rem;
+        border-radius: 12px;
       }
 
       .arjs-loader {
@@ -43,20 +58,21 @@
       <div>Cargando cámara...</div>
     </div>
 
-    <script>
-      window.onload = () => {
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-        if (isIOS) {
-          alert("Estás usando Safari en iOS. Si la imagen no se muestra, intentá recargar.");
-        }
-      };
-    </script>
+    <div class="fallback" id="fallback">
+      <h2>Tu dispositivo no soporta RA desde este navegador</h2>
+      <p>Pero no te preocupes, acá tenés una vista previa:</p>
+      <img src="csg.jpeg" alt="Vista previa del contenido RA" />
+      <p>
+        <a href="csg.jpeg" target="_blank" style="color: #00ccff;">Ver imagen completa</a>
+      </p>
+    </div>
 
     <a-scene
       embedded
       vr-mode-ui="enabled: false"
       renderer="antialias: true; alpha: true;"
       arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
+      id="scene"
     >
       <a-marker preset="hiro">
         <a-plane
@@ -70,5 +86,23 @@
 
       <a-entity camera></a-entity>
     </a-scene>
+
+    <script>
+      window.onload = () => {
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+        if (isIOS) {
+          // Intenta cargar RA, y si falla, muestra fallback
+          setTimeout(() => {
+            const scene = document.querySelector("a-scene");
+            if (!scene.hasLoaded) {
+              console.warn("RA no disponible, mostrando fallback");
+              document.getElementById("scene").style.display = "none";
+              document.getElementById("fallback").style.display = "block";
+            }
+          }, 3000); // espera 3 segundos por si carga la RA
+        }
+      };
+    </script>
   </body>
 </html>
