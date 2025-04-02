@@ -1,44 +1,67 @@
 <!DOCTYPE html>
 <html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <title>Realidad Aumentada Local</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Realidad Aumentada - Imagen</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- Librerías locales -->
-  <script src="js/aframe.min.js"></script>
-  <script src="js/aframe-ar.min.js"></script>
+    <!-- 🧠 Versión correcta de A-Frame y AR.js -->
+    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.5/aframe/build/aframe-ar.js"></script>
 
-  <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background-color: #000;
-    }
-  </style>
-</head>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #000;
+      }
 
-<body>
-  <a-scene
-    embedded
-    arjs="sourceType: webcam; debugUIEnabled: false;"
-    vr-mode-ui="enabled: false"
-    renderer="logarithmicDepthBuffer: true;"
-  >
+      .arjs-loader {
+        height: 100%;
+        width: 100%;
+        position: absolute;
+        top: 0;
+        left: 0;
+        background-color: rgba(0, 0, 0, 0.8);
+        z-index: 9999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
 
-    <!-- Marcador HIRO -->
-    <a-marker preset="hiro">
-      <!-- Imagen flotando en RA (reemplazá con la tuya si querés) -->
-      <a-plane
-        src="csg.jpeg"
-        width="100"
-        height="0.75"
-        rotation="-90 0 0"
-        position="0 0.5 0"
-      ></a-plane>
-    </a-marker>
+      .arjs-loader div {
+        text-align: center;
+        font-size: 1.25em;
+        color: white;
+      }
+    </style>
+  </head>
 
-    <a-entity camera></a-entity>
-  </a-scene>
-</body>
+  <body>
+    <!-- Pantalla de carga (opcional) -->
+    <div class="arjs-loader">
+      <div>Cargando cámara... no pestañees</div>
+    </div>
+
+    <a-scene
+      embedded
+      vr-mode-ui="enabled: false"
+      renderer="logarithmicDepthBuffer: true;"
+      arjs="sourceType: webcam; debugUIEnabled: false;"
+    >
+      <!-- 📷 Marcador HIRO -->
+      <a-marker preset="hiro">
+        <!-- 📌 Imagen cargada como plano 2D -->
+        <a-plane
+          src="csg.jpeg"
+          width="1"
+          height="0.75"
+          position="0 0 0"
+          rotation="0 0 0"
+        ></a-plane>
+      </a-marker>
+
+      <a-entity camera></a-entity>
+    </a-scene>
+  </body>
 </html>
