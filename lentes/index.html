@@ -30,7 +30,13 @@
     </div>
 
     <a-scene
-      mindar-image="imageTargetSrc: ./lentes.mind; autoStart: true"
+      mindar-image="
+        imageTargetSrc: ./lentes.mind;
+        autoStart: true;
+        uiLoading: yes;
+        uiError: yes;
+        uiScanning: yes;
+      "
       color-space="sRGB"
       renderer="colorManagement: true, physicallyCorrectLights"
       vr-mode-ui="enabled: false"
@@ -66,32 +72,27 @@
           this.startPan = null;
           this.startPos = null;
 
-          // Bind de los handlers para poder removerlos luego
           this._onTouchStart = this._onTouchStart.bind(this);
           this._onTouchMove  = this._onTouchMove.bind(this);
           this._onTouchEnd   = this._onTouchEnd.bind(this);
 
           const sceneEl = this.el.sceneEl;
-          const setupListeners = () => {
+          const setup = () => {
             const canvas = sceneEl.canvas;
             canvas.addEventListener('touchstart', this._onTouchStart);
             canvas.addEventListener('touchmove',  this._onTouchMove);
             canvas.addEventListener('touchend',   this._onTouchEnd);
           };
 
-          if (sceneEl.hasLoaded) {
-            setupListeners();
-          } else {
-            sceneEl.addEventListener('render-target-loaded', setupListeners);
-          }
+          if (sceneEl.hasLoaded) setup();
+          else sceneEl.addEventListener('render-target-loaded', setup);
         },
 
-        _onTouchStart: function (e) {
+        _onTouchStart(e) {
           if (e.touches.length === 1) {
             this.startPan = { x: e.touches[0].clientX, y: e.touches[0].clientY };
             this.startPos = this.el.object3D.position.clone();
-          }
-          if (e.touches.length === 2) {
+          } else if (e.touches.length === 2) {
             const dx = e.touches[0].clientX - e.touches[1].clientX;
             const dy = e.touches[0].clientY - e.touches[1].clientY;
             this.initialDistance = Math.hypot(dx, dy);
@@ -99,16 +100,16 @@
           }
         },
 
-        _onTouchMove: function (e) {
+        _onTouchMove(e) {
           if (e.touches.length === 2 && this.initialDistance) {
             const dx = e.touches[0].clientX - e.touches[1].clientX;
             const dy = e.touches[0].clientY - e.touches[1].clientY;
             const distance = Math.hypot(dx, dy);
-            const scaleFactor = distance / this.initialDistance;
+            const factor = distance / this.initialDistance;
             this.el.object3D.scale.set(
-              this.initialScale.x * scaleFactor,
-              this.initialScale.y * scaleFactor,
-              this.initialScale.z * scaleFactor
+              this.initialScale.x * factor,
+              this.initialScale.y * factor,
+              this.initialScale.z * factor
             );
           }
 
@@ -123,15 +124,14 @@
           }
         },
 
-        _onTouchEnd: function () {
+        _onTouchEnd() {
           this.initialDistance = null;
           this.initialScale    = null;
           this.startPan        = null;
           this.startPos        = null;
         },
 
-        remove: function () {
-          // Limpiar listeners
+        remove() {
           const sceneEl = this.el.sceneEl;
           const canvas = sceneEl && sceneEl.canvas;
           if (canvas) {
