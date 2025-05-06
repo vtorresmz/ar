@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Iron Man Face AR</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Librerías -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-face-aframe.prod.js"></script>
+
+  <style>
+    html,body{margin:0;height:100%;overflow:hidden;}
+    a-scene{position:fixed;width:100%;height:100%;}
+  </style>
+</head>
+<body>
+  <a-scene
+     mindar-face
+     embedded
+     color-space="sRGB"
+     renderer="colorManagement: true, physicallyCorrectLights"
+     vr-mode-ui="enabled: false"
+     device-orientation-permission-ui="enabled: false">
+
+    <!-- Cámara controlada por MindAR -->
+    <a-camera active="false"></a-camera>
+
+    <!-- Occluder: es la malla de la cara con material invisible -->
+    <a-entity
+        mindar-face-occluder
+        position="0 0 0"
+        scale="1 1 1"
+        material="color: #ff0000; opacity: 0; transparent: true"
+        gltf-model="url(assets/faceOccluder.glb)">
+    </a-entity>
+
+    <!--  OPCIÓN A · Más rápida: máscara 2D pegada a la cara  -->
+    <a-entity mindar-face-target="anchorIndex: 0">
+      <a-plane
+      src="ironman.png"
+      transparent="true"
+      width="1.5" height="1.7"
+      position="0 0.50 0.05"> <!-- +Y sube la textura → prueba 0.05‑0.10 -->
+    </a-plane>
+    </a-entity>
+
+    <!--  OPCIÓN B · Modelo 3D — descomenta si tienes ironman_mask.glb
+    <a-entity mindar-face-target="anchorIndex: 0">
+      <a-gltf-model
+         src="assets/ironman_mask.glb"
+         scale="1 1 1"
+         rotation="0 0 0">
+      </a-gltf-model>
+    </a-entity>
+    -->
+
+  </a-scene>
+</body>
+</html>
