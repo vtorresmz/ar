@@ -1,0 +1,1630 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>🎮 Juego AR Multijugador en Tiempo Real - Cartas Pokemon</title>
+    
+    <!-- Librerías A-Frame y MindAR -->
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+    
+    <!-- Firebase SDK -->
+    <script type="module">
+        // Import Firebase modules
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.15.0/firebase-app.js';
+        import { getDatabase, ref, set, onValue, push, remove, onDisconnect } from 'https://www.gstatic.com/firebasejs/9.15.0/firebase-database.js';
+        
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyCe31VTJ65WhmuUqbBlE_q68nG7BlMNEmE",
+            authDomain: "juego-ar.firebaseapp.com",
+            databaseURL: "https://juego-ar-default-rtdb.firebaseio.com",
+            projectId: "juego-ar",
+            storageBucket: "juego-ar.firebasestorage.app",
+            messagingSenderId: "833731466156",
+            appId: "1:833731466156:web:3ec08425a6863d39042009",
+            measurementId: "G-YGYNT540WY"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const database = getDatabase(app);
+        
+        // Hacer Firebase disponible globalmente
+        window.firebaseDB = database;
+        window.firebaseRef = ref;
+        window.firebaseSet = set;
+        window.firebaseOnValue = onValue;
+        window.firebasePush = push;
+        window.firebaseRemove = remove;
+        window.firebaseOnDisconnect = onDisconnect;
+    </script>
+    
+    <!-- Componente de cursor y arrastre personalizado -->
+    <script>
+        // Componente de arrastre personalizado
+        AFRAME.registerComponent('draggable', {
+            schema: {
+                playerId: { type: 'string' }
+            },
+            init: function() {
+                this.isDragging = false;
+                this.plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+                this.raycaster = new THREE.Raycaster();
+                this.mouse = new THREE.Vector2();
+                this.intersectionPoint = new THREE.Vector3();
+                
+                this.onMouseDown = this.onMouseDown.bind(this);
+                this.onMouseMove = this.onMouseMove.bind(this);
+                this.onMouseUp = this.onMouseUp.bind(this);
+                this.onTouchStart = this.onTouchStart.bind(this);
+                this.onTouchMove = this.onTouchMove.bind(this);
+                this.onTouchEnd = this.onTouchEnd.bind(this);
+                
+                // Eventos para mouse
+                this.el.addEventListener('mousedown', this.onMouseDown);
+                window.addEventListener('mousemove', this.onMouseMove);
+                window.addEventListener('mouseup', this.onMouseUp);
+                
+                // Eventos para touch (móvil)
+                this.el.addEventListener('touchstart', this.onTouchStart);
+                window.addEventListener('touchmove', this.onTouchMove);
+                window.addEventListener('touchend', this.onTouchEnd);
+                
+                // Cursor pointer para indicar que es arrastrable
+                this.el.setAttribute('style', 'cursor: grab;');
+            },
+            
+            onMouseDown: function(event) {
+                event.preventDefault();
+                this.startDrag(event.clientX, event.clientY);
+            },
+            
+            onTouchStart: function(event) {
+                event.preventDefault();
+                if (event.touches.length === 1) {
+                    const touch = event.touches[0];
+                    this.startDrag(touch.clientX, touch.clientY);
+                }
+            },
+            
+            startDrag: function(x, y) {
+                this.isDragging = true;
+                this.el.setAttribute('style', 'cursor: grabbing;');
+                
+                // Log del inicio del arrastre
+                if (window.game) {
+                    const playerId = this.data.playerId;
+                    const player = window.game.players.get(playerId);
+                    if (player) {
+                        window.game.log(`🖱️ Arrastrando ${player.name}...`);
+                    }
+                }
+                
+                this.updateMousePosition(x, y);
+            },
+            
+            onMouseMove: function(event) {
+                if (this.isDragging) {
+                    this.updateMousePosition(event.clientX, event.clientY);
+                    this.updatePosition();
+                }
+            },
+            
+            onTouchMove: function(event) {
+                if (this.isDragging && event.touches.length === 1) {
+                    const touch = event.touches[0];
+                    this.updateMousePosition(touch.clientX, touch.clientY);
+                    this.updatePosition();
+                }
+            },
+            
+            onMouseUp: function(event) {
+                this.endDrag();
+            },
+            
+            onTouchEnd: function(event) {
+                this.endDrag();
+            },
+            
+            endDrag: function() {
+                if (this.isDragging) {
+                    this.isDragging = false;
+                    this.el.setAttribute('style', 'cursor: grab;');
+                    
+                    // Actualizar posición del jugador en el sistema
+                    if (window.game) {
+                        const playerId = this.data.playerId;
+                        const player = window.game.players.get(playerId);
+                        if (player && !player.isRemote) {
+                            const position = this.el.getAttribute('position');
+                            player.position = {
+                                x: position.x,
+                                y: position.y,
+                                z: position.z
+                            };
+                            window.game.log(`📍 ${player.name} reposicionado en (${position.x.toFixed(1)}, ${position.z.toFixed(1)})`);
+                            window.game.updatePlayersUI();
+                            
+                            // Sincronizar con Firebase
+                            window.game.syncPlayerToFirebase(player);
+                        }
+                    }
+                }
+            },
+            
+            updateMousePosition: function(x, y) {
+                const canvas = this.el.sceneEl.canvas;
+                const rect = canvas.getBoundingClientRect();
+                this.mouse.x = ((x - rect.left) / rect.width) * 2 - 1;
+                this.mouse.y = -((y - rect.top) / rect.height) * 2 + 1;
+            },
+            
+            updatePosition: function() {
+                const camera = this.el.sceneEl.camera;
+                this.raycaster.setFromCamera(this.mouse, camera);
+                
+                if (this.raycaster.ray.intersectPlane(this.plane, this.intersectionPoint)) {
+                    // Limitar el movimiento dentro de un área específica
+                    const maxDistance = 4.0; // Radio máximo de movimiento
+                    const distance = this.intersectionPoint.length();
+                    
+                    if (distance > maxDistance) {
+                        this.intersectionPoint.normalize().multiplyScalar(maxDistance);
+                    }
+                    
+                    this.el.setAttribute('position', {
+                        x: this.intersectionPoint.x,
+                        y: 0,
+                        z: this.intersectionPoint.z
+                    });
+                }
+            }
+        });
+    </script>
+    
+    <style>
+        html, body {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        /* Escena AR */
+        a-scene {
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* Panel de Control Principal */
+        #game-ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 15px;
+            backdrop-filter: blur(8px);
+            border: 2px solid rgba(102, 126, 234, 0.3);
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+            min-width: 280px;
+            max-width: 350px;
+        }
+
+        #game-ui h2 {
+            color: #667eea;
+            margin: 0 0 15px 0;
+            font-size: 18px;
+            text-align: center;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+        }
+
+        /* Botones del juego */
+        .game-btn {
+            width: 100%;
+            margin: 5px 0;
+            padding: 12px 16px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .game-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .game-btn:active {
+            transform: translateY(0);
+        }
+
+        .game-btn.secondary {
+            background: linear-gradient(135deg, #f093fb, #f5576c);
+        }
+
+        .game-btn.success {
+            background: linear-gradient(135deg, #4facfe, #00f2fe);
+        }
+
+        .game-btn.danger {
+            background: linear-gradient(135deg, #ff758c, #ff7eb3);
+        }
+
+        /* Panel de Jugadores */
+        #players-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            color: white;
+            min-width: 200px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
+        #players-panel h3 {
+            color: #4facfe;
+            margin: 0 0 15px 0;
+            font-size: 16px;
+            text-align: center;
+        }
+
+        .player-card {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+            backdrop-filter: blur(5px);
+        }
+
+        .player-card.active {
+            border-color: #4facfe;
+            background: rgba(79, 172, 254, 0.2);
+        }
+
+        .player-name {
+            font-weight: bold;
+            color: #4facfe;
+            margin-bottom: 8px;
+        }
+
+        .hp-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .hp-bar {
+            flex: 1;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            margin: 0 10px;
+            overflow: hidden;
+        }
+
+        .hp-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff758c, #ff7eb3);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        .hp-fill.high {
+            background: linear-gradient(90deg, #4facfe, #00f2fe);
+        }
+
+        .hp-fill.medium {
+            background: linear-gradient(90deg, #f093fb, #f5576c);
+        }
+
+        .hp-fill.low {
+            background: linear-gradient(90deg, #ff758c, #ff7eb3);
+        }
+
+        .hp-controls {
+            display: flex;
+            gap: 5px;
+            margin-top: 8px;
+        }
+
+        .hp-btn {
+            flex: 1;
+            padding: 6px 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
+            transition: all 0.2s ease;
+        }
+
+        .hp-btn.heal {
+            background: #4facfe;
+            color: white;
+        }
+
+        .hp-btn.damage {
+            background: #ff758c;
+            color: white;
+        }
+
+        .hp-btn:hover {
+            transform: scale(1.05);
+        }
+
+        /* Panel de Chat/Log */
+        #game-log {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            color: white;
+            max-height: 150px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        #game-log h4 {
+            color: #4facfe;
+            margin: 0 0 10px 0;
+            font-size: 14px;
+        }
+
+        .log-entry {
+            font-size: 12px;
+            margin-bottom: 5px;
+            padding: 5px 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            border-left: 3px solid #4facfe;
+        }
+
+        /* Panel de conexión */
+        #connection-panel {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(102, 126, 234, 0.3);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+            min-width: 400px;
+        }
+
+        #connection-panel h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+
+        .connection-options {
+            display: flex;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .connection-input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            text-align: center;
+            text-transform: uppercase;
+        }
+
+        .connection-input:focus {
+            border-color: #667eea;
+            outline: none;
+        }
+
+        #room-code-display {
+            background: rgba(102, 126, 234, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            border: 2px solid #667eea;
+        }
+
+        #room-code-display strong {
+            font-size: 24px;
+            color: #667eea;
+            font-family: monospace;
+        }
+
+        /* Panel de sala */
+        #room-info {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        #room-info.host {
+            background: rgba(102, 126, 234, 0.9);
+        }
+
+        /* Indicadores de conexión */
+        .connection-status {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
+        .connection-status.online {
+            background: #4facfe;
+            box-shadow: 0 0 10px #4facfe;
+        }
+
+        .connection-status.offline {
+            background: #ff758c;
+        }
+
+        /* Estilos para jugadores remotos */
+        .player-card.remote {
+            border-color: #f093fb;
+            background: rgba(240, 147, 251, 0.2);
+        }
+
+        .player-card.local {
+            border-color: #4facfe;
+            background: rgba(79, 172, 254, 0.2);
+        }
+
+        .player-name.remote::after {
+            content: " 🌐";
+            font-size: 12px;
+        }
+
+        .player-name.local::after {
+            content: " 🏠";
+            font-size: 12px;
+        }
+        /* Estado del sistema */
+        #game-status {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(102, 126, 234, 0.3);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+            display: none;
+        }        #game-status h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 24px;
+        }
+
+        #game-status p {
+            color: #666;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            #game-ui {
+                top: 5px;
+                left: 5px;
+                right: 5px;
+                min-width: auto;
+                max-width: none;
+                width: calc(100vw - 10px);
+                box-sizing: border-box;
+            }
+
+            #players-panel {
+                top: auto;
+                bottom: 10px;
+                right: 5px;
+                left: 5px;
+                max-height: 200px;
+            }
+
+            .hp-controls {
+                flex-direction: column;
+            }
+
+            .hp-btn {
+                margin-bottom: 3px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Panel de Conexión -->
+    <div id="connection-panel">
+        <h2>🎮 Juego AR Multijugador</h2>
+        <p><strong>Conecta con tus amigos en tiempo real</strong></p>
+        
+        <div class="connection-options">
+            <button id="create-room-btn" class="game-btn">🎯 Crear Sala</button>
+            <button id="join-room-btn" class="game-btn secondary">🚀 Unirse a Sala</button>
+        </div>
+
+        <div id="join-room-section" style="display: none;">
+            <input type="text" id="room-code-input" class="connection-input" placeholder="Código de sala (ej: ABC123)" maxlength="6">
+            <button id="connect-room-btn" class="game-btn success">Conectar</button>
+        </div>
+
+        <div id="room-code-display" style="display: none;">
+            <p><strong>Comparte este código con tus amigos:</strong></p>
+            <strong id="room-code-text">ABC123</strong>
+            <p style="font-size: 14px; color: #666; margin-top: 10px;">
+                Esperando jugadores... <span id="players-count">1/8</span>
+            </p>
+            <button id="start-multiplayer-game-btn" class="game-btn">🚀 Iniciar Juego</button>
+        </div>
+    </div>
+
+    <!-- Información de la sala -->
+    <div id="room-info" style="display: none;">
+        <span class="connection-status online"></span>
+        <span id="room-info-text">Sala: ABC123 | Jugadores: 2/8</span>
+    </div>
+
+    <!-- Estado del Sistema (mantener oculto inicialmente) -->
+    <div id="game-status">
+        <h2>🎮 Juego AR Multijugador</h2>
+        <p><strong>Instrucciones:</strong></p>
+        <ul style="text-align: left; color: #666;">
+            <li>Escanea tarjetas físicas para agregar personajes</li>
+            <li>Cada tarjeta detectada se convierte en un jugador</li>
+            <li>Controla HP, ataques y habilidades desde el panel</li>
+            <li>Todos los jugadores ven los cambios en tiempo real</li>
+        </ul>
+        <button id="start-game-btn" class="game-btn">🚀 Iniciar Juego</button>
+    </div>
+
+    <!-- Panel de Control Principal -->
+    <div id="game-ui" style="display: none;">
+        <h2>🎮 Control de Juego</h2>
+        
+        <button id="add-player-btn" class="game-btn">➕ Agregar Jugador</button>
+        <button id="reset-game-btn" class="game-btn secondary">🔄 Reiniciar Juego</button>
+        <button id="toggle-log-btn" class="game-btn success">📜 Ver Log</button>
+        <button id="reposition-players-btn" class="game-btn" onclick="game.repositionAllPlayers()">🎯 Reorganizar Jugadores</button>
+        
+        <div style="margin-top: 15px;">
+            <label style="color: #667eea; font-weight: bold; display: block; margin-bottom: 8px;">
+                🎯 Daño Global:
+            </label>
+            <div style="display: flex; gap: 5px;">
+                <button class="hp-btn damage" onclick="applyGlobalDamage(10)">-10 HP</button>
+                <button class="hp-btn damage" onclick="applyGlobalDamage(25)">-25 HP</button>
+                <button class="hp-btn damage" onclick="applyGlobalDamage(50)">-50 HP</button>
+            </div>
+        </div>
+
+        <div style="margin-top: 15px;">
+            <label style="color: #667eea; font-weight: bold; display: block; margin-bottom: 8px;">
+                ✨ Curación Global:
+            </label>
+            <div style="display: flex; gap: 5px;">
+                <button class="hp-btn heal" onclick="applyGlobalHeal(10)">+10 HP</button>
+                <button class="hp-btn heal" onclick="applyGlobalHeal(25)">+25 HP</button>
+                <button class="hp-btn heal" onclick="applyGlobalHeal(50)">+50 HP</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel de Jugadores -->
+    <div id="players-panel" style="display: none;">
+        <h3>👥 Jugadores Activos</h3>
+        <div id="players-list">
+            <!-- Los jugadores se generarán dinámicamente -->
+        </div>
+    </div>
+
+    <!-- Log del Juego -->
+    <div id="game-log">
+        <h4>📜 Log de Batalla</h4>
+        <div id="log-content">
+            <!-- Entradas del log se generarán aquí -->
+        </div>
+    </div>
+    <!-- Log del Juego -->
+    <div id="game-log">
+        <h4>📜 Log de Batalla</h4>
+        <div id="log-content">
+            <!-- Entradas del log se generarán aquí -->
+        </div>
+    </div>
+
+    <!-- Escena A-Frame -->
+    <a-scene
+        mindar-image="imageTargetSrc: https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.5/examples/image-tracking/assets/card-example/card.mind; autoStart: false; uiLoading: no; uiScanning: no; uiError: no"
+        embedded
+        color-space="sRGB"
+        renderer="colorManagement: true, physicallyCorrectLights"
+        vr-mode-ui="enabled: false"
+        device-orientation-permission-ui="enabled: false"
+        cursor="rayOrigin: mouse">
+
+        <a-camera active="false">
+            <!-- Cursor para interacción con mouse/touch -->
+            <a-cursor
+                position="0 0 -1"
+                geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03"
+                material="color: #4facfe; shader: flat; opacity: 0.8; transparent: true"
+                visible="false">
+            </a-cursor>
+        </a-camera>
+
+        <!-- Assets -->
+        <a-assets>
+            <!-- Personajes base (puedes reemplazar con tus propias imágenes) -->
+            <img id="pikachu" src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI0ZGRDcwMCIvPjx0ZXh0IHg9IjUwIiB5PSI1NSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjMzMzIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5QaWthY2h1PC90ZXh0Pjwvc3ZnPg==">
+            <img id="charizard" src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI0ZGNjM0NyIvPjx0ZXh0IHg9IjUwIiB5PSI1NSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjRkZGIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5DaGFyaXphcmQ8L3RleHQ+PC9zdmc+">
+            <img id="blastoise" src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzNEQkRGRiIvPjx0ZXh0IHg9IjUwIiB5PSI1NSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjRkZGIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5CbGFzdG9pc2U8L3RleHQ+PC9zdmc+">
+            <img id="venusaur" src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzQ4Q0Y0QyIvPjx0ZXh0IHg9IjUwIiB5PSI1NSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjRkZGIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5WZW51c2F1cjwvdGV4dD48L3N2Zz4=">
+        </a-assets>
+
+        <!-- Target de imagen detectado -->
+        <a-entity id="card-target" mindar-image-target="targetIndex: 0">
+            <!-- Plano invisible para arrastre -->
+            <a-plane 
+                id="drag-plane"
+                position="0 0 0"
+                rotation="-90 0 0"
+                width="10"
+                height="10"
+                material="color: #ffffff; opacity: 0; transparent: true"
+                visible="false">
+            </a-plane>
+            
+            <!-- Área visual de juego (opcional) -->
+            <a-circle
+                position="0 -0.005 0"
+                rotation="-90 0 0"
+                radius="4"
+                material="color: #667eea; opacity: 0.1; transparent: true">
+            </a-circle>
+            
+            <!-- Aquí se generarán dinámicamente los personajes -->
+        </a-entity>
+    </a-scene>
+
+    <script>
+        // 🎮 Sistema de Juego Multijugador AR en Tiempo Real
+        class ARMultiplayerGame {
+            constructor() {
+                this.players = new Map();
+                this.gameActive = false;
+                this.playerCounter = 0;
+                this.characters = ['pikachu', 'charizard', 'blastoise', 'venusaur'];
+                this.scene = null;
+                this.cardTarget = null;
+                this.arSystem = null;
+                
+                // Sistema Firebase
+                this.roomCode = null;
+                this.isHost = false;
+                this.playerId = this.generatePlayerId();
+                this.roomRef = null;
+                this.playersRef = null;
+                this.gameStateRef = null;
+                
+                // Sistema de posicionamiento inteligente
+                this.occupiedPositions = new Set();
+                this.gridSize = 1.2;
+                this.maxRadius = 3.5;
+                
+                this.init();
+            }
+
+            generatePlayerId() {
+                return 'player_' + Math.random().toString(36).substr(2, 9);
+            }
+
+            generateRoomCode() {
+                return Math.random().toString(36).substr(2, 6).toUpperCase();
+            }
+
+            init() {
+                // Referencias DOM
+                this.gameStatus = document.getElementById('game-status');
+                this.gameUI = document.getElementById('game-ui');
+                this.playersPanel = document.getElementById('players-panel');
+                this.playersList = document.getElementById('players-list');
+                this.gameLog = document.getElementById('game-log');
+                this.logContent = document.getElementById('log-content');
+                this.connectionPanel = document.getElementById('connection-panel');
+                this.roomInfo = document.getElementById('room-info');
+
+                // Event listeners de conexión
+                document.getElementById('create-room-btn').addEventListener('click', () => this.createRoom());
+                document.getElementById('join-room-btn').addEventListener('click', () => this.showJoinRoom());
+                document.getElementById('connect-room-btn').addEventListener('click', () => this.joinRoom());
+                document.getElementById('start-multiplayer-game-btn').addEventListener('click', () => this.startMultiplayerGame());
+
+                // Event listeners del juego
+                document.getElementById('start-game-btn').addEventListener('click', () => this.startGame());
+                document.getElementById('add-player-btn').addEventListener('click', () => this.addPlayer());
+                document.getElementById('reset-game-btn').addEventListener('click', () => this.resetGame());
+                document.getElementById('toggle-log-btn').addEventListener('click', () => this.toggleLog());
+
+                // Configurar A-Frame
+                this.setupAFrame();
+                
+                this.log('🎮 Sistema de juego multijugador iniciado');
+                
+                // Esperar a que Firebase esté disponible
+                this.waitForFirebase();
+            }
+
+            waitForFirebase() {
+                if (window.firebaseDB) {
+                    this.log('🔥 Firebase conectado exitosamente');
+                } else {
+                    setTimeout(() => this.waitForFirebase(), 100);
+                }
+            }
+
+            // 🎯 Sistema de Salas Multijugador
+            async createRoom() {
+                try {
+                    this.roomCode = this.generateRoomCode();
+                    this.isHost = true;
+                    
+                    const database = window.firebaseDB;
+                    this.roomRef = window.firebaseRef(database, `rooms/${this.roomCode}`);
+                    this.playersRef = window.firebaseRef(database, `rooms/${this.roomCode}/players`);
+                    this.gameStateRef = window.firebaseRef(database, `rooms/${this.roomCode}/gameState`);
+                    
+                    // Crear sala en Firebase
+                    await window.firebaseSet(this.roomRef, {
+                        host: this.playerId,
+                        created: Date.now(),
+                        gameActive: false,
+                        maxPlayers: 8
+                    });
+
+                    // Agregar el host como jugador
+                    await this.addPlayerToRoom(this.playerId, 'Host', true);
+                    
+                    // Configurar listeners
+                    this.setupFirebaseListeners();
+                    
+                    // Actualizar UI
+                    document.getElementById('room-code-text').textContent = this.roomCode;
+                    document.getElementById('room-code-display').style.display = 'block';
+                    document.getElementById('create-room-btn').style.display = 'none';
+                    document.getElementById('join-room-btn').style.display = 'none';
+                    
+                    this.updateRoomInfo();
+                    this.log(`🎯 Sala creada: ${this.roomCode}`);
+                    
+                } catch (error) {
+                    console.error('Error creando sala:', error);
+                    alert('Error creando la sala. Verifica tu conexión.');
+                }
+            }
+
+            showJoinRoom() {
+                document.getElementById('join-room-section').style.display = 'block';
+                document.getElementById('create-room-btn').style.display = 'none';
+                document.getElementById('join-room-btn').style.display = 'none';
+            }
+
+            async joinRoom() {
+                try {
+                    const inputCode = document.getElementById('room-code-input').value.toUpperCase().trim();
+                    if (inputCode.length !== 6) {
+                        alert('El código debe tener 6 caracteres');
+                        return;
+                    }
+                    
+                    this.roomCode = inputCode;
+                    this.isHost = false;
+                    
+                    const database = window.firebaseDB;
+                    this.roomRef = window.firebaseRef(database, `rooms/${this.roomCode}`);
+                    this.playersRef = window.firebaseRef(database, `rooms/${this.roomCode}/players`);
+                    this.gameStateRef = window.firebaseRef(database, `rooms/${this.roomCode}/gameState`);
+                    
+                    // Verificar que la sala existe
+                    const roomSnapshot = await new Promise((resolve) => {
+                        window.firebaseOnValue(this.roomRef, resolve, { onlyOnce: true });
+                    });
+                    
+                    if (!roomSnapshot.exists()) {
+                        alert('Sala no encontrada. Verifica el código.');
+                        return;
+                    }
+
+                    // Agregar jugador a la sala
+                    await this.addPlayerToRoom(this.playerId, `Jugador ${Date.now().toString().slice(-4)}`, false);
+                    
+                    // Configurar listeners
+                    this.setupFirebaseListeners();
+                    
+                    // Ocultar panel de conexión
+                    this.connectionPanel.style.display = 'none';
+                    this.roomInfo.style.display = 'block';
+                    
+                    this.updateRoomInfo();
+                    this.log(`🚀 Conectado a sala: ${this.roomCode}`);
+                    
+                } catch (error) {
+                    console.error('Error uniéndose a sala:', error);
+                    alert('Error conectándose a la sala. Verifica el código.');
+                }
+            }
+
+            async addPlayerToRoom(playerId, playerName, isHost = false) {
+                const playerRef = window.firebaseRef(window.firebaseDB, `rooms/${this.roomCode}/players/${playerId}`);
+                await window.firebaseSet(playerRef, {
+                    name: playerName,
+                    isHost: isHost,
+                    connected: true,
+                    joinedAt: Date.now()
+                });
+                
+                // Configurar desconexión automática
+                const disconnectRef = window.firebaseOnDisconnect(playerRef);
+                await disconnectRef.remove();
+            }
+
+            setupFirebaseListeners() {
+                // Listener para cambios en jugadores
+                window.firebaseOnValue(this.playersRef, (snapshot) => {
+                    this.updatePlayersFromFirebase(snapshot);
+                });
+                
+                // Listener para estado del juego
+                window.firebaseOnValue(this.gameStateRef, (snapshot) => {
+                    this.updateGameStateFromFirebase(snapshot);
+                });
+            }
+
+            updatePlayersFromFirebase(snapshot) {
+                const playersData = snapshot.val() || {};
+                const playerCount = Object.keys(playersData).length;
+                
+                // Actualizar contador de jugadores
+                const playersCountEl = document.getElementById('players-count');
+                if (playersCountEl) {
+                    playersCountEl.textContent = `${playerCount}/8`;
+                }
+                
+                this.updateRoomInfo();
+                this.log(`👥 Jugadores en sala: ${playerCount}`);
+            }
+
+            updateGameStateFromFirebase(snapshot) {
+                const gameState = snapshot.val();
+                if (gameState) {
+                    // Sincronizar estado del juego
+                    if (gameState.gameActive && !this.gameActive) {
+                        this.startGameFromRemote();
+                    }
+                    
+                    // Sincronizar jugadores del juego
+                    if (gameState.players) {
+                        this.syncPlayersFromFirebase(gameState.players);
+                    }
+                }
+            }
+
+            startGameFromRemote() {
+                this.connectionPanel.style.display = 'none';
+                this.gameStatus.style.display = 'none';
+                this.gameUI.style.display = 'block';
+                this.playersPanel.style.display = 'block';
+                this.gameActive = true;
+                this.log('🎮 Juego iniciado por el host');
+            }
+
+            async startMultiplayerGame() {
+                if (!this.isHost) {
+                    alert('Solo el host puede iniciar el juego');
+                    return;
+                }
+                
+                try {
+                    // Actualizar estado en Firebase
+                    await window.firebaseSet(this.gameStateRef, {
+                        gameActive: true,
+                        startedAt: Date.now(),
+                        players: {}
+                    });
+                    
+                    // Iniciar juego localmente
+                    this.connectionPanel.style.display = 'none';
+                    this.gameUI.style.display = 'block';
+                    this.playersPanel.style.display = 'block';
+                    
+                    // Configurar A-Frame
+                    this.setupAFrame();
+                    await this.startGame();
+                    
+                } catch (error) {
+                    console.error('Error iniciando juego:', error);
+                    alert('Error iniciando el juego');
+                }
+            }
+
+            updateRoomInfo() {
+                if (this.roomCode) {
+                    const roomInfoText = document.getElementById('room-info-text');
+                    const playersCountEl = document.getElementById('players-count');
+                    const playerCount = playersCountEl ? playersCountEl.textContent.split('/')[0] : '1';
+                    
+                    roomInfoText.textContent = `Sala: ${this.roomCode} | Jugadores: ${playerCount}/8 ${this.isHost ? '👑' : ''}`;
+                    
+                    const roomInfoEl = document.getElementById('room-info');
+                    if (this.isHost) {
+                        roomInfoEl.classList.add('host');
+                    }
+                }
+            }
+
+            // Sincronizar jugadores desde Firebase
+            async syncPlayersFromFirebase(firebasePlayers) {
+                // Actualizar jugadores locales con datos de Firebase
+                Object.entries(firebasePlayers).forEach(([playerId, playerData]) => {
+                    if (this.players.has(playerId)) {
+                        const localPlayer = this.players.get(playerId);
+                        // Actualizar HP
+                        localPlayer.currentHP = playerData.currentHP;
+                        localPlayer.maxHP = playerData.maxHP;
+                        localPlayer.active = playerData.active;
+                        
+                        // Actualizar posición si es diferente
+                        if (playerData.position && 
+                            (Math.abs(localPlayer.position.x - playerData.position.x) > 0.1 ||
+                             Math.abs(localPlayer.position.z - playerData.position.z) > 0.1)) {
+                            localPlayer.position = playerData.position;
+                            this.updatePlayerARPosition(playerId, playerData.position);
+                        }
+                    } else if (playerId !== this.playerId) {
+                        // Crear jugador remoto
+                        this.createRemotePlayer(playerId, playerData);
+                    }
+                });
+                
+                this.updatePlayersUI();
+            }
+
+            createRemotePlayer(playerId, playerData) {
+                const player = {
+                    id: playerId,
+                    name: playerData.name,
+                    character: playerData.character,
+                    maxHP: playerData.maxHP,
+                    currentHP: playerData.currentHP,
+                    active: playerData.active,
+                    position: playerData.position,
+                    isRemote: true
+                };
+                
+                this.players.set(playerId, player);
+                this.createPlayerAR(player);
+                this.log(`🌐 Jugador remoto conectado: ${player.name}`);
+            }
+
+            updatePlayerARPosition(playerId, position) {
+                const playerEntity = document.querySelector(`#ar-${playerId}`);
+                if (playerEntity) {
+                    playerEntity.setAttribute('animation__sync', 
+                        `property: position; to: ${position.x} 0 ${position.z}; dur: 500; easing: easeInOutQuad`);
+                }
+            }
+
+            // Sincronizar cambios locales con Firebase
+            async syncPlayerToFirebase(player) {
+                if (this.gameStateRef && this.gameActive) {
+                    const playerRef = window.firebaseRef(window.firebaseDB, 
+                        `rooms/${this.roomCode}/gameState/players/${player.id}`);
+                    
+                    await window.firebaseSet(playerRef, {
+                        name: player.name,
+                        character: player.character,
+                        maxHP: player.maxHP,
+                        currentHP: player.currentHP,
+                        active: player.active,
+                        position: player.position,
+                        updatedAt: Date.now()
+                    });
+                }
+            }
+
+            setupAFrame() {
+                this.scene = document.querySelector('a-scene');
+                this.cardTarget = document.querySelector('#card-target');
+                
+                this.scene.addEventListener('loaded', () => {
+                    this.arSystem = this.scene.systems['mindar-image-system'];
+                    this.log('✅ Sistema AR cargado');
+                });
+
+                // Eventos de detección de tarjetas
+                this.cardTarget.addEventListener('targetFound', () => {
+                    this.log('🎯 ¡Tarjeta detectada!');
+                    this.onCardDetected();
+                });
+
+                this.cardTarget.addEventListener('targetLost', () => {
+                    this.log('❌ Tarjeta perdida');
+                });
+            }
+
+            // 🎯 Sistema de Posicionamiento Inteligente
+            calculateSmartPosition() {
+                // Posiciones predefinidas estratégicas con mayor separación
+                const strategicPositions = [
+                    { x: 0, z: 0 },         // Centro
+                    { x: -1.5, z: -1.5 },   // Esquina superior izquierda
+                    { x: 1.5, z: -1.5 },    // Esquina superior derecha
+                    { x: -1.5, z: 1.5 },    // Esquina inferior izquierda
+                    { x: 1.5, z: 1.5 },     // Esquina inferior derecha
+                    { x: 0, z: -2.2 },      // Centro superior
+                    { x: -2.2, z: 0 },      // Centro izquierda
+                    { x: 2.2, z: 0 }        // Centro derecha
+                ];
+
+                // Si tenemos posiciones estratégicas disponibles, usarlas
+                if (this.players.size < strategicPositions.length) {
+                    const position = strategicPositions[this.players.size];
+                    return { x: position.x, y: 0, z: position.z };
+                }
+
+                // Si hay más de 8 jugadores, usar algoritmo de distribución en círculo
+                return this.calculateCircularPosition();
+            }
+
+            calculateCircularPosition() {
+                const playerCount = this.players.size;
+                const radius = Math.min(this.maxRadius, 1.0 + (playerCount * 0.25)); // Mayor radio base
+                const angle = (2 * Math.PI * playerCount) / Math.max(8, playerCount + 1);
+                
+                const x = radius * Math.cos(angle);
+                const z = radius * Math.sin(angle);
+                
+                return { x: x, y: 0, z: z };
+            }
+
+            // Verificar si una posición está muy cerca de otras ocupadas
+            isPositionTooClose(newPos, minDistance = 1.0) { // Distancia mínima aumentada
+                for (const [playerId, player] of this.players) {
+                    const distance = Math.sqrt(
+                        Math.pow(player.position.x - newPos.x, 2) + 
+                        Math.pow(player.position.z - newPos.z, 2)
+                    );
+                    if (distance < minDistance) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // Ajustar posición si hay conflicto
+            adjustPositionIfNeeded(position) {
+                let attempts = 0;
+                let adjustedPosition = { ...position };
+                
+                while (this.isPositionTooClose(adjustedPosition) && attempts < 20) {
+                    // Mover ligeramente en una dirección aleatoria con mayor offset
+                    const angle = Math.random() * 2 * Math.PI;
+                    const offset = 0.8 + (attempts * 0.2); // Offset mayor
+                    
+                    adjustedPosition.x += Math.cos(angle) * offset;
+                    adjustedPosition.z += Math.sin(angle) * offset;
+                    
+                    // Mantener dentro del radio máximo
+                    const distance = Math.sqrt(adjustedPosition.x ** 2 + adjustedPosition.z ** 2);
+                    if (distance > this.maxRadius) {
+                        adjustedPosition.x = (adjustedPosition.x / distance) * this.maxRadius;
+                        adjustedPosition.z = (adjustedPosition.z / distance) * this.maxRadius;
+                    }
+                    
+                    attempts++;
+                }
+                
+                return adjustedPosition;
+            }
+
+            async startGame() {
+                try {
+                    this.log('🚀 Iniciando juego...');
+                    this.gameStatus.style.display = 'none';
+                    this.gameUI.style.display = 'block';
+                    this.playersPanel.style.display = 'block';
+
+                    // Iniciar AR
+                    if (this.arSystem) {
+                        await this.arSystem.start();
+                        this.log('📱 AR iniciado - Escanea tarjetas para agregar jugadores');
+                    }
+
+                    this.gameActive = true;
+                    this.log('✅ Juego activo - ¡Comienza la batalla!');
+
+                } catch (error) {
+                    console.error('Error iniciando juego:', error);
+                    this.log('❌ Error: ' + error.message);
+                    
+                    if (error.name === 'NotAllowedError') {
+                        alert('⚠️ Permite el acceso a la cámara para continuar');
+                    }
+                }
+            }
+
+            onCardDetected() {
+                if (!this.gameActive) return;
+                
+                // Agregar jugador automáticamente cuando se detecta una tarjeta
+                setTimeout(() => {
+                    this.addPlayer();
+                }, 500);
+            }
+
+            addPlayer() {
+                if (this.players.size >= 8) {
+                    this.log('⚠️ Máximo 8 jugadores alcanzado');
+                    return;
+                }
+
+                this.playerCounter++;
+                const playerId = `${this.playerId}_${this.playerCounter}`;
+                const character = this.characters[Math.floor(Math.random() * this.characters.length)];
+                const playerName = this.generatePlayerName(character);
+
+                // Calcular posición inteligente sin superposiciones
+                const smartPosition = this.calculateSmartPosition();
+                const finalPosition = this.adjustPositionIfNeeded(smartPosition);
+
+                const player = {
+                    id: playerId,
+                    name: playerName,
+                    character: character,
+                    maxHP: 100 + Math.floor(Math.random() * 50),
+                    currentHP: 0,
+                    active: true,
+                    position: finalPosition,
+                    isRemote: false
+                };
+
+                player.currentHP = player.maxHP;
+                this.players.set(playerId, player);
+
+                this.createPlayerAR(player);
+                this.updatePlayersUI();
+                
+                // Sincronizar con Firebase
+                this.syncPlayerToFirebase(player);
+                
+                const distanceInfo = this.calculateDistanceInfo(player);
+                this.log(`🎭 ${playerName} se posicionó en (${finalPosition.x.toFixed(1)}, ${finalPosition.z.toFixed(1)}) - ${distanceInfo} - ${player.maxHP} HP`);
+            }
+
+            calculateDistanceInfo(player) {
+                let minDistance = Infinity;
+                this.players.forEach((otherPlayer) => {
+                    if (otherPlayer.id !== player.id) {
+                        const distance = Math.sqrt(
+                            Math.pow(player.position.x - otherPlayer.position.x, 2) + 
+                            Math.pow(player.position.z - otherPlayer.position.z, 2)
+                        );
+                        minDistance = Math.min(minDistance, distance);
+                    }
+                });
+                return minDistance === Infinity ? "primer jugador" : `${minDistance.toFixed(1)} unidades del más cercano`;
+            }
+
+            createPlayerAR(player) {
+                // Crear entidad AR para el jugador - ARRASTRABLE
+                const playerEntity = document.createElement('a-entity');
+                playerEntity.id = `ar-${player.id}`;
+                playerEntity.setAttribute('position', `${player.position.x} 0 ${player.position.z}`);
+                
+                // Solo hacer arrastrable si es jugador local
+                if (!player.isRemote) {
+                    playerEntity.setAttribute('draggable', `playerId: ${player.id}`);
+                }
+                playerEntity.setAttribute('class', 'interactive');
+                
+                // Color diferente para jugadores remotos
+                const platformColor = player.isRemote ? '#f093fb' : '#667eea';
+                const borderColor = player.isRemote ? '#ff758c' : '#4facfe';
+                
+                // Plataforma base con colores según tipo de jugador
+                const platform = document.createElement('a-circle');
+                platform.setAttribute('radius', '0.4');
+                platform.setAttribute('position', '0 -0.01 0');
+                platform.setAttribute('rotation', '-90 0 0');
+                platform.setAttribute('material', `color: ${platformColor}; opacity: 0.4; transparent: true`);
+                platform.setAttribute('animation', 'property: rotation; to: -90 360 0; dur: 10000; loop: true; easing: linear');
+                
+                // Borde de la plataforma
+                const platformBorder = document.createElement('a-ring');
+                platformBorder.setAttribute('radius-inner', '0.35');
+                platformBorder.setAttribute('radius-outer', '0.4');
+                platformBorder.setAttribute('position', '0 -0.005 0');
+                platformBorder.setAttribute('rotation', '-90 0 0');
+                platformBorder.setAttribute('material', `color: ${borderColor}; opacity: 0.8; transparent: true`);
+                platformBorder.setAttribute('animation', 'property: material.opacity; to: 1; dur: 1000; loop: true; dir: alternate; easing: easeInOutSine');
+                
+                // Avatar del personaje
+                const avatar = document.createElement('a-plane');
+                avatar.setAttribute('src', `#${player.character}`);
+                avatar.setAttribute('width', '0.8');
+                avatar.setAttribute('height', '0.8');
+                avatar.setAttribute('position', '0 0.5 0');
+                avatar.setAttribute('material', 'transparent: true');
+                avatar.setAttribute('animation__float', 'property: position; to: 0 ' + 
+                    `${0.5 + Math.sin(Date.now()) * 0.05} 0; ` +
+                    'dur: 2000; loop: true; dir: alternate; easing: easeInOutSine');
+                
+                // Sombra
+                const shadow = document.createElement('a-circle');
+                shadow.setAttribute('radius', '0.3');
+                shadow.setAttribute('position', '0 0.02 0');
+                shadow.setAttribute('rotation', '-90 0 0');
+                shadow.setAttribute('material', 'color: #000000; opacity: 0.3; transparent: true');
+                
+                // Barra de HP
+                const hpBarBg = document.createElement('a-plane');
+                hpBarBg.setAttribute('width', '0.8');
+                hpBarBg.setAttribute('height', '0.08');
+                hpBarBg.setAttribute('position', '0 0.9 0');
+                hpBarBg.setAttribute('material', 'color: #333333; transparent: true; opacity: 0.8');
+                
+                const hpBar = document.createElement('a-plane');
+                hpBar.setAttribute('width', '0.8');
+                hpBar.setAttribute('height', '0.06');
+                hpBar.setAttribute('position', '0 0.91 0');
+                hpBar.setAttribute('material', `color: ${borderColor}; transparent: true; opacity: 0.9`);
+                hpBar.id = `hp-bar-${player.id}`;
+
+                // Nombre del jugador
+                const nameBg = document.createElement('a-plane');
+                nameBg.setAttribute('width', '1.2');
+                nameBg.setAttribute('height', '0.15');
+                nameBg.setAttribute('position', '0 1.1 0');
+                nameBg.setAttribute('material', 'color: #000000; transparent: true; opacity: 0.6');
+                
+                const nameText = document.createElement('a-text');
+                nameText.setAttribute('value', player.name);
+                nameText.setAttribute('position', '0 1.11 0');
+                nameText.setAttribute('align', 'center');
+                nameText.setAttribute('color', '#FFFFFF');
+                nameText.setAttribute('width', '4');
+
+                // Indicador de tipo de jugador
+                const indicator = document.createElement('a-text');
+                indicator.setAttribute('value', player.isRemote ? '🌐' : '🏠');
+                indicator.setAttribute('position', '0 1.3 0');
+                indicator.setAttribute('align', 'center');
+                indicator.setAttribute('color', borderColor);
+                indicator.setAttribute('width', '6');
+                if (!player.isRemote) {
+                    indicator.setAttribute('animation', 'property: scale; to: 1.2 1.2 1.2; dur: 800; loop: true; dir: alternate; easing: easeInOutSine');
+                }
+
+                // Efecto de aparición
+                playerEntity.setAttribute('animation__spawn', 'property: scale; from: 0 0 0; to: 1 1 1; dur: 800; easing: easeOutBounce');
+                
+                // Solo eventos hover para jugadores locales
+                if (!player.isRemote) {
+                    playerEntity.addEventListener('mouseenter', function() {
+                        platform.setAttribute('material', `color: ${borderColor}; opacity: 0.6; transparent: true`);
+                        avatar.setAttribute('animation__hover', 'property: scale; to: 1.1 1.1 1.1; dur: 200; easing: easeOutQuad');
+                    });
+                    
+                    playerEntity.addEventListener('mouseleave', function() {
+                        platform.setAttribute('material', `color: ${platformColor}; opacity: 0.4; transparent: true`);
+                        avatar.setAttribute('animation__hover', 'property: scale; to: 1 1 1; dur: 200; easing: easeOutQuad');
+                    });
+                }
+                
+                playerEntity.appendChild(platform);
+                playerEntity.appendChild(platformBorder);
+                playerEntity.appendChild(shadow);
+                playerEntity.appendChild(avatar);
+                playerEntity.appendChild(hpBarBg);
+                playerEntity.appendChild(hpBar);
+                playerEntity.appendChild(nameBg);
+                playerEntity.appendChild(nameText);
+                playerEntity.appendChild(indicator);
+                
+                this.cardTarget.appendChild(playerEntity);
+                
+                const playerType = player.isRemote ? 'remoto 🌐' : 'local 🏠';
+                this.log(`📍 ${player.name} (${playerType}) apareció en (${player.position.x.toFixed(2)}, ${player.position.z.toFixed(2)})`);
+            }
+
+            generatePlayerName(character) {
+                const names = {
+                    pikachu: ['Sparky', 'Bolt', 'Thunder', 'Zigzag'],
+                    charizard: ['Blaze', 'Flame', 'Ember', 'Phoenix'],
+                    blastoise: ['Aqua', 'Splash', 'Tsunami', 'Torrent'],
+                    venusaur: ['Leaf', 'Petal', 'Sage', 'Forest']
+                };
+                
+                const characterNames = names[character] || ['Player'];
+                const randomName = characterNames[Math.floor(Math.random() * characterNames.length)];
+                return `${randomName} #${this.playerCounter}`;
+            }
+
+            updatePlayersUI() {
+                this.playersList.innerHTML = '';
+                
+                this.players.forEach((player) => {
+                    const playerCard = document.createElement('div');
+                    playerCard.className = `player-card ${player.isRemote ? 'remote' : 'local'}`;
+                    if (player.active) playerCard.classList.add('active');
+
+                    const hpPercentage = (player.currentHP / player.maxHP) * 100;
+                    let hpClass = 'high';
+                    if (hpPercentage < 30) hpClass = 'low';
+                    else if (hpPercentage < 60) hpClass = 'medium';
+
+                    // Solo mostrar controles para jugadores locales
+                    const controls = player.isRemote ? '' : `
+                        <div class="hp-controls">
+                            <button class="hp-btn heal" onclick="game.healPlayer('${player.id}', 10)">+10</button>
+                            <button class="hp-btn heal" onclick="game.healPlayer('${player.id}', 25)">+25</button>
+                            <button class="hp-btn damage" onclick="game.damagePlayer('${player.id}', 10)">-10</button>
+                            <button class="hp-btn damage" onclick="game.damagePlayer('${player.id}', 25)">-25</button>
+                        </div>
+                    `;
+
+                    playerCard.innerHTML = `
+                        <div class="player-name ${player.isRemote ? 'remote' : 'local'}">${player.name}</div>
+                        <div class="hp-container">
+                            <span>❤️</span>
+                            <div class="hp-bar">
+                                <div class="hp-fill ${hpClass}" style="width: ${hpPercentage}%"></div>
+                            </div>
+                            <span>${player.currentHP}/${player.maxHP}</span>
+                        </div>
+                        ${controls}
+                    `;
+
+                    this.playersList.appendChild(playerCard);
+                });
+
+                // Actualizar barras HP en AR
+                this.updateARHealthBars();
+            }
+
+            updateARHealthBars() {
+                this.players.forEach((player) => {
+                    const hpBar = document.querySelector(`#hp-bar-${player.id}`);
+                    if (hpBar) {
+                        const hpPercentage = (player.currentHP / player.maxHP);
+                        const width = 0.8 * hpPercentage;
+                        
+                        hpBar.setAttribute('width', width.toString());
+                        
+                        let color = '#4facfe'; // Alto HP - azul
+                        if (hpPercentage < 0.3) color = '#ff758c'; // Bajo HP - rojo
+                        else if (hpPercentage < 0.6) color = '#f093fb'; // Medio HP - rosa
+                        
+                        hpBar.setAttribute('material', `color: ${color}; transparent: true; opacity: 0.8`);
+                        
+                        // Efecto de pulso cuando el HP es muy bajo
+                        if (hpPercentage < 0.2) {
+                            hpBar.setAttribute('animation__pulse', 'property: material.opacity; to: 0.3; dur: 500; loop: true; dir: alternate; easing: easeInOutSine');
+                        } else {
+                            hpBar.removeAttribute('animation__pulse');
+                        }
+                    }
+                });
+            }
+
+            healPlayer(playerId, amount) {
+                const player = this.players.get(playerId);
+                if (!player || player.isRemote) return;
+
+                const oldHP = player.currentHP;
+                player.currentHP = Math.min(player.currentHP + amount, player.maxHP);
+                const actualHeal = player.currentHP - oldHP;
+
+                this.updatePlayersUI();
+                this.syncPlayerToFirebase(player);
+                this.log(`✨ ${player.name} se curó ${actualHeal} HP (${player.currentHP}/${player.maxHP})`);
+            }
+
+            damagePlayer(playerId, amount) {
+                const player = this.players.get(playerId);
+                if (!player || player.isRemote) return;
+
+                const oldHP = player.currentHP;
+                player.currentHP = Math.max(player.currentHP - amount, 0);
+                const actualDamage = oldHP - player.currentHP;
+
+                this.updatePlayersUI();
+                this.syncPlayerToFirebase(player);
+                
+                if (player.currentHP === 0) {
+                    player.active = false;
+                    this.log(`💀 ${player.name} ha sido derrotado!`);
+                    this.checkGameOver();
+                } else {
+                    this.log(`⚔️ ${player.name} recibió ${actualDamage} de daño (${player.currentHP}/${player.maxHP})`);
+                }
+            }
+
+            checkGameOver() {
+                const activePlayers = Array.from(this.players.values()).filter(p => p.active && p.currentHP > 0);
+                
+                if (activePlayers.length <= 1) {
+                    if (activePlayers.length === 1) {
+                        this.log(`🎉 ¡${activePlayers[0].name} es el ganador!`);
+                    } else {
+                        this.log('💥 ¡Empate! Todos los jugadores han sido derrotados');
+                    }
+                    
+                    setTimeout(() => {
+                        if (confirm('🎮 ¿Quieres jugar otra ronda?')) {
+                            this.resetGame();
+                        }
+                    }, 2000);
+                }
+            }
+
+            resetGame() {
+                this.log('🔄 Reiniciando juego...');
+                
+                // Limpiar jugadores AR
+                this.players.forEach((player) => {
+                    const arEntity = document.querySelector(`#ar-${player.id}`);
+                    if (arEntity) {
+                        arEntity.remove();
+                    }
+                });
+
+                // Reiniciar sistema de posicionamiento
+                this.players.clear();
+                this.occupiedPositions.clear();
+                this.playerCounter = 0;
+                this.updatePlayersUI();
+                this.log('✅ Juego reiniciado - ¡Escanea tarjetas para comenzar!');
+            }
+
+            // Reorganizar todos los jugadores automáticamente
+            repositionAllPlayers() {
+                this.log('🎯 Reorganizando todos los jugadores...');
+                
+                let playerIndex = 0;
+                this.players.forEach((player) => {
+                    // Calcular nueva posición usando el sistema inteligente
+                    const strategicPositions = [
+                        { x: 0, z: 0 },
+                        { x: -1.5, z: -1.5 },
+                        { x: 1.5, z: -1.5 },
+                        { x: -1.5, z: 1.5 },
+                        { x: 1.5, z: 1.5 },
+                        { x: 0, z: -2.2 },
+                        { x: -2.2, z: 0 },
+                        { x: 2.2, z: 0 }
+                    ];
+                    
+                    let newPosition;
+                    if (playerIndex < strategicPositions.length) {
+                        newPosition = strategicPositions[playerIndex];
+                    } else {
+                        // Distribución circular para jugadores adicionales
+                        const radius = 1.0 + (playerIndex * 0.25);
+                        const angle = (2 * Math.PI * playerIndex) / Math.max(8, this.players.size + 1);
+                        newPosition = {
+                            x: radius * Math.cos(angle),
+                            z: radius * Math.sin(angle)
+                        };
+                    }
+                    
+                    // Actualizar posición del jugador
+                    player.position = { x: newPosition.x, y: 0, z: newPosition.z };
+                    
+                    // Mover la entidad AR con animación
+                    const playerEntity = document.querySelector(`#ar-${player.id}`);
+                    if (playerEntity) {
+                        playerEntity.setAttribute('animation__reposition', 
+                            `property: position; to: ${newPosition.x} 0 ${newPosition.z}; dur: 1000; easing: easeInOutQuad`);
+                    }
+                    
+                    playerIndex++;
+                });
+                
+                this.log(`✅ ${this.players.size} jugadores reorganizados automáticamente`);
+            }
+
+            toggleLog() {
+                const isVisible = this.gameLog.style.display !== 'none';
+                this.gameLog.style.display = isVisible ? 'none' : 'block';
+            }
+
+            log(message) {
+                console.log(message);
+                
+                const timestamp = new Date().toLocaleTimeString();
+                const logEntry = document.createElement('div');
+                logEntry.className = 'log-entry';
+                logEntry.innerHTML = `<strong>[${timestamp}]</strong> ${message}`;
+                
+                this.logContent.appendChild(logEntry);
+                this.logContent.scrollTop = this.logContent.scrollHeight;
+
+                // Limitar a 50 entradas
+                if (this.logContent.children.length > 50) {
+                    this.logContent.removeChild(this.logContent.firstChild);
+                }
+            }
+        }
+
+        // Funciones globales para los botones
+        function applyGlobalDamage(amount) {
+            game.players.forEach((player) => {
+                if (player.active && player.currentHP > 0 && !player.isRemote) {
+                    game.damagePlayer(player.id, amount);
+                }
+            });
+            game.log(`💥 Ataque global: ${amount} de daño a todos los jugadores locales`);
+        }
+
+        function applyGlobalHeal(amount) {
+            game.players.forEach((player) => {
+                if (player.active && !player.isRemote) {
+                    game.healPlayer(player.id, amount);
+                }
+            });
+            game.log(`✨ Curación global: ${amount} HP a todos los jugadores locales`);
+        }
+
+        // Inicializar juego
+        let game;
+        document.addEventListener('DOMContentLoaded', () => {
+            game = new ARMultiplayerGame();
+        });
+    </script>
+
+</body>
+</html>
