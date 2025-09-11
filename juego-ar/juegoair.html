@@ -869,11 +869,17 @@
                     this.gameStateRef = window.firebaseRef(database, `rooms/${this.roomCode}/gameState`);
                     
                     // Verificar que la sala existe
-                    const roomSnapshot = await new Promise((resolve) => {
-                        window.firebaseOnValue(this.roomRef, resolve, { onlyOnce: true });
-                    });
+                    let roomExists = false;
+                    window.firebaseOnValue(this.roomRef, (snapshot) => {
+                        if (snapshot.exists()) {
+                            roomExists = true;
+                        }
+                    }, { onlyOnce: true });
                     
-                    if (!roomSnapshot.exists()) {
+                    // Esperar un momento para la verificación
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    if (!roomExists) {
                         alert('Sala no encontrada. Verifica el código.');
                         return;
                     }
@@ -884,9 +890,12 @@
                     // Configurar listeners
                     this.setupFirebaseListeners();
                     
-                    // Ocultar panel de conexión
+                    // Ocultar panel de conexión y mostrar info de sala
                     this.connectionPanel.style.display = 'none';
                     this.roomInfo.style.display = 'block';
+                    
+                    // Configurar A-Frame inmediatamente
+                    this.setupAFrame();
                     
                     this.updateRoomInfo();
                     this.log(`🚀 Conectado a sala: ${this.roomCode}`);
@@ -958,7 +967,25 @@
                 this.gameUI.style.display = 'block';
                 this.playersPanel.style.display = 'block';
                 this.gameActive = true;
-                this.log('🎮 Juego iniciado por el host');
+                
+                // Asegurar que A-Frame esté configurado
+                if (!this.arSystem) {
+                    this.setupAFrame();
+                }
+                
+                // Iniciar AR si no está iniciado
+                setTimeout(async () => {
+                    try {
+                        if (this.arSystem && !this.arSystem.started) {
+                            await this.arSystem.start();
+                            this.log('📱 AR iniciado automáticamente');
+                        }
+                    } catch (error) {
+                        console.error('Error iniciando AR:', error);
+                    }
+                }, 1000);
+                
+                this.log('🎮 Juego iniciado por el host - AR listo para escanear');
             }
 
             async startMultiplayerGame() {
@@ -979,9 +1006,9 @@
                     this.connectionPanel.style.display = 'none';
                     this.gameUI.style.display = 'block';
                     this.playersPanel.style.display = 'block';
+                    this.gameActive = true;
                     
-                    // Configurar A-Frame
-                    this.setupAFrame();
+                    // Iniciar AR
                     await this.startGame();
                     
                 } catch (error) {
@@ -1007,6 +1034,8 @@
 
             // Sincronizar jugadores desde Firebase
             async syncPlayersFromFirebase(firebasePlayers) {
+                this.log(`🔄 Sincronizando ${Object.keys(firebasePlayers).length} jugadores desde Firebase`);
+                
                 // Actualizar jugadores locales con datos de Firebase
                 Object.entries(firebasePlayers).forEach(([playerId, playerData]) => {
                     if (this.players.has(playerId)) {
@@ -1025,6 +1054,7 @@
                         }
                     } else if (playerId !== this.playerId) {
                         // Crear jugador remoto
+                        this.log(`👤 Creando jugador remoto: ${playerData.name}`);
                         this.createRemotePlayer(playerId, playerData);
                     }
                 });
@@ -1033,6 +1063,8 @@
             }
 
             createRemotePlayer(playerId, playerData) {
+                this.log(`🎮 Creando jugador remoto: ${playerData.name} (${playerId})`);
+                
                 const player = {
                     id: playerId,
                     name: playerData.name,
@@ -1040,13 +1072,13 @@
                     maxHP: playerData.maxHP,
                     currentHP: playerData.currentHP,
                     active: playerData.active,
-                    position: playerData.position,
+                    position: playerData.position || this.getNextPosition(),
                     isRemote: true
                 };
                 
                 this.players.set(playerId, player);
                 this.createPlayerAR(player);
-                this.log(`🌐 Jugador remoto conectado: ${player.name}`);
+                this.log(`✅ Jugador remoto creado: ${player.name} en posición (${player.position.x}, ${player.position.z})`);
             }
 
             updatePlayerARPosition(playerId, position) {
@@ -1197,8 +1229,19 @@
             }
 
             onCardDetected() {
-                if (!this.gameActive) return;
+                this.log('🎯 Tarjeta detectada - Verificando estado del juego...');
                 
+                if (!this.gameActive) {
+                    this.log('⚠️ Juego no activo, ignorando detección de tarjeta');
+                    return;
+                }
+
+                if (!this.currentRoomId) {
+                    this.log('⚠️ No hay sala activa, ignorando detección de tarjeta');
+                    return;
+                }
+                
+                this.log('✅ Agregando jugador por detección de tarjeta...');
                 // Agregar jugador automáticamente cuando se detecta una tarjeta
                 setTimeout(() => {
                     this.addPlayer();
