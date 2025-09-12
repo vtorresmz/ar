@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subtítulos en Vivo con Seguimiento Facial - Iron Man</title>
+    
+    <!-- Librerías A-Frame y MindAR -->
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-face-aframe.prod.js"></script>
+    
+    <style>
+        html, body {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+        }
+
+        /* Escena AR a pantalla completa */
+        a-scene {
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* Panel de controles */
+        #ui {
+            position: absolute;
+            z-index: 1000;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 10px;
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+            display: none;
+        }
+
+        #ui button {
+            margin: 2px 4px;
+            padding: 8px 12px;
+            background: linear-gradient(135deg, rgb(54, 40, 135), rgb(74, 60, 155));
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            font-size: 12px;
+        }
+
+        #ui button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(54, 40, 135, 0.4);
+        }
+
+        #ui button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Subtítulos sobre la escena AR */
+        #captions {
+            position: fixed !important;
+            left: 50% !important;
+            transform: translateX(-50%) !important;
+            bottom: 50px !important;
+            max-width: 90vw !important;
+            background: rgba(255, 0, 0, 0.9) !important; /* ROJO TEMPORAL PARA DEBUG */
+            color: #ffffff !important;
+            padding: 20px 30px !important;
+            border-radius: 15px !important;
+            font-size: 28px !important;
+            line-height: 1.4 !important;
+            z-index: 99999 !important;
+            display: block !important; /* CAMBIO: visible por defecto */
+            opacity: 0 !important; /* OCULTO POR OPACITY EN VEZ DE DISPLAY */
+            font-weight: 700 !important;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8) !important;
+            border: 4px solid rgba(255, 255, 255, 0.8) !important;
+            backdrop-filter: blur(10px) !important;
+            text-align: center !important;
+            box-shadow: 0 0 20px rgba(255, 0, 0, 0.5) !important; /* SOMBRA ROJA PARA VISIBILITY */
+            visibility: hidden !important; /* OCULTO POR VISIBILITY */
+            pointer-events: none !important;
+        }
+
+        /* Estado del sistema */
+        #status {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 14px;
+            backdrop-filter: blur(5px);
+        }
+
+        /* Panel de transcripción */
+        #transcriptPanel {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 10px;
+            max-width: 300px;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        #transcriptPanel h4 {
+            color: rgb(54, 40, 135);
+            margin: 0 0 10px 0;
+            font-size: 14px;
+        }
+
+        #transcriptText {
+            font-size: 12px;
+            color: #333;
+            line-height: 1.4;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .clear-btn {
+            background: linear-gradient(135deg, #dc3545, #c82333) !important;
+            margin-top: 10px;
+            font-size: 11px;
+            padding: 5px 10px;
+        }
+
+        /* Panel de inicio */
+        #startPanel {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+        }
+
+        #startPanel h2 {
+            color: rgb(54, 40, 135);
+            margin-bottom: 15px;
+        }
+
+        #startPanel p {
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        #btn-start {
+            background: linear-gradient(135deg, rgb(54, 40, 135), rgb(74, 60, 155)) !important;
+            font-size: 16px !important;
+            padding: 12px 24px !important;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            #ui {
+                top: 5px;
+                left: 5px;
+                padding: 10px;
+            }
+
+            #captions {
+                bottom: 30px;
+                font-size: 20px;
+                padding: 15px 20px;
+            }
+
+            #status {
+                top: 5px;
+                right: 5px;
+                font-size: 12px;
+                padding: 8px 12px;
+            }
+
+            #transcriptPanel {
+                bottom: 5px;
+                right: 5px;
+                max-width: 250px;
+            }
+
+            #startPanel {
+                margin: 10px;
+                width: calc(100vw - 20px);
+                max-width: 350px;
+            }
+        }
+    </style>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const scene = document.querySelector("a-scene");
+            const ui = document.getElementById("ui");
+            const startPanel = document.getElementById("startPanel");
+            const startBtn = document.getElementById("btn-start");
+            const stopBtn = document.getElementById("btn-stop");
+            const pauseBtn = document.getElementById("btn-pause");
+            const playBtn = document.getElementById("btn-play");
+            const toggleTranscriptBtn = document.getElementById("btn-toggle-transcript");
+            
+            let arSystem;
+            let mediaStream = null;
+            let recognition = null;
+            let isCapturing = false;
+            let savedTranscript = '';
+            let faceDetected = false;
+
+            // Elemento de subtítulos AR
+            const arCaptionsEl = document.getElementById('ar-captions');
+            const arStatusEl = document.getElementById('ar-status');
+            const captionsEl = document.getElementById('captions'); // Backup HTML
+            const statusEl = document.getElementById('status');
+            const transcriptPanel = document.getElementById('transcriptPanel');
+            const transcriptText = document.getElementById('transcriptText');
+            
+            // Debug inicial - verificar que los elementos existen
+            console.log('🔍 Debug elementos AR:');
+            console.log('arCaptionsEl:', arCaptionsEl);
+            console.log('arStatusEl:', arStatusEl);
+            console.log('faceAnchor:', document.getElementById("face-anchor"));
+            
+            if (!arCaptionsEl) {
+                console.error('❌ ERROR: No se encontró el elemento #ar-captions');
+            }
+
+            // Inicializar sistema AR
+            scene.addEventListener("loaded", () => {
+                arSystem = scene.systems["mindar-face-system"];
+                console.log('✅ Sistema AR cargado');
+                
+                // Configurar botones AR
+                startBtn.onclick = startSystem;
+                stopBtn.onclick = stopSystem;
+                pauseBtn.onclick = () => arSystem?.pause();
+                playBtn.onclick = () => arSystem?.unpause();
+                toggleTranscriptBtn.onclick = toggleTranscript;
+                
+                updateStatus('Sistema listo - Presiona Start');
+            });
+
+            // Eventos de detección facial
+            const faceAnchor = document.getElementById("face-anchor");
+            
+            if (!faceAnchor) {
+                console.error('❌ ERROR: No se encontró el elemento #face-anchor');
+            }
+            
+            faceAnchor.addEventListener("targetFound", () => {
+                console.log('🎯 Cara detectada - FORZANDO SUBTÍTULOS');
+                faceDetected = true;
+                ui.style.display = "block";
+                updateStatus('Cara detectada - Máscara aplicada');
+                
+                // Mensaje elegante al detectar cara
+                const arCaptions = document.querySelector('#ar-captions');
+                if (arCaptions) {
+                    arCaptions.setAttribute('value', '🎭 Cara detectada - Habla ahora');
+                    arCaptions.setAttribute('visible', 'true');
+                    arCaptions.setAttribute('color', 'lightgreen');
+                    console.log('✅ Mensaje de cara detectada mostrado');
+                }
+                
+                console.log('Estado: faceDetected=', faceDetected, 'isCapturing=', isCapturing);
+            });
+            
+            faceAnchor.addEventListener("targetLost", () => {
+                console.log('❌ Cara perdida');
+                faceDetected = false;
+                updateStatus(isCapturing ? 'Reconocimiento activo - Busca tu cara' : 'Sistema listo - Presiona Start');
+                
+                // Mensaje cuando se pierde la cara
+                const arCaptions = document.querySelector('#ar-captions');
+                if (arCaptions) {
+                    arCaptions.setAttribute('value', '👤 Busca tu cara para continuar');
+                    arCaptions.setAttribute('color', 'orange');
+                }
+                
+                console.log('Estado: faceDetected=', faceDetected, 'isCapturing=', isCapturing);
+            });
+
+            async function startSystem() {
+                try {
+                    updateStatus('Iniciando sistema...');
+                    startPanel.style.display = 'none';
+                    
+                    // 1. Iniciar sistema AR
+                    if (arSystem) {
+                        await arSystem.start();
+                        console.log('✅ Sistema AR iniciado');
+                    }
+                    
+                    // 2. Iniciar captura de audio para reconocimiento de voz
+                    await startAudioCapture();
+                    
+                    stopBtn.style.display = 'inline-block';
+                    pauseBtn.style.display = 'inline-block';
+                    playBtn.style.display = 'inline-block';
+                    toggleTranscriptBtn.style.display = 'inline-block';
+                    
+                    updateStatus('Sistema activo - Habla frente a la cámara');
+                    
+                } catch (error) {
+                    console.error('❌ Error iniciando sistema:', error);
+                    updateStatus('Error: ' + error.message);
+                    startPanel.style.display = 'block';
+                    
+                    if (error.name === 'NotAllowedError') {
+                        alert('⚠️ Permite el acceso a cámara y micrófono para continuar');
+                    }
+                }
+            }
+
+            async function stopSystem() {
+                try {
+                    updateStatus('Deteniendo sistema...');
+                    isCapturing = false;
+
+                    // Detener reconocimiento de voz
+                    if (recognition) {
+                        recognition.stop();
+                        recognition = null;
+                    }
+
+                    // Detener captura de audio
+                    if (mediaStream) {
+                        mediaStream.getTracks().forEach(track => track.stop());
+                        mediaStream = null;
+                    }
+
+                    // Detener sistema AR
+                    if (arSystem) {
+                        arSystem.stop();
+                    }
+
+                    // Resetear UI
+                    startPanel.style.display = 'block';
+                    stopBtn.style.display = 'none';
+                    pauseBtn.style.display = 'none';
+                    playBtn.style.display = 'none';
+                    toggleTranscriptBtn.style.display = 'none';
+                    ui.style.display = 'none';
+                    captionsEl.style.display = 'none';
+                    transcriptPanel.style.display = 'none';
+                    
+                    updateStatus('Sistema detenido');
+                    
+                } catch (error) {
+                    console.error('❌ Error deteniendo sistema:', error);
+                    updateStatus('Error al detener');
+                }
+            }
+
+            async function startAudioCapture() {
+                try {
+                    // Permisos de micrófono
+                    const constraints = {
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        }
+                    };
+                    mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    console.log('✅ Micrófono accedido');
+
+                    // Iniciar Web Speech API
+                    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                    if (!SpeechRecognition) {
+                        throw new Error('Tu navegador no soporta reconocimiento de voz');
+                    }
+
+                    recognition = new SpeechRecognition();
+                    recognition.lang = 'es-ES';
+                    recognition.continuous = true;
+                    recognition.interimResults = true;
+                    recognition.maxAlternatives = 1;
+
+                    recognition.onstart = () => {
+                        isCapturing = true;
+                        console.log('🎤 Reconocimiento de voz iniciado');
+                    };
+
+                    recognition.onresult = (event) => {
+                        let interim = '';
+                        let newFinalText = '';
+                        
+                        for (let i = event.resultIndex; i < event.results.length; i++) {
+                            const result = event.results[i];
+                            const transcript = result[0].transcript;
+                            
+                            if (result.isFinal) {
+                                newFinalText += transcript + ' ';
+                            } else {
+                                interim += transcript;
+                            }
+                        }
+
+                        // Guardar texto final
+                        if (newFinalText.trim()) {
+                            savedTranscript += newFinalText;
+                            updateTranscriptArea();
+                        }
+
+                        // Mostrar subtítulos en tiempo real (texto final + provisional)
+                        const fullText = (savedTranscript + interim).trim();
+                        console.log('🎤 Texto detectado:', fullText, 'Cara detectada:', faceDetected);
+                        
+                        if (fullText) {
+                            // SIEMPRE mostrar subtítulos para debug, sin importar faceDetected
+                            showSubtitles(fullText);
+                        }
+                        
+                        // COMENTADO PARA DEBUG - NO OCULTAR
+                        // else if (!faceDetected && fullText) {
+                        //     hideSubtitlesAR();
+                        // }
+                    };
+
+                    recognition.onend = () => {
+                        if (isCapturing) {
+                            try {
+                                recognition.start();
+                            } catch (e) {
+                                console.warn('Reintento de reconocimiento:', e);
+                            }
+                        }
+                    };
+
+                    recognition.onerror = (event) => {
+                        console.error('Error en reconocimiento de voz:', event.error);
+                        if (event.error === 'not-allowed') {
+                            updateStatus('Permiso de micrófono denegado');
+                        }
+                    };
+
+                    recognition.start();
+
+                } catch (error) {
+                    throw new Error('No se pudo acceder al micrófono: ' + error.message);
+                }
+            }
+
+            function showSubtitlesAR(text) {
+                console.log('🎬 showSubtitlesAR llamada con:', text);
+                
+                const arCaptions = document.querySelector('#ar-captions');
+                if (arCaptions) {
+                    console.log('✅ Elemento ar-captions encontrado!');
+                    
+                    // Calcular dimensiones responsivas basadas en viewport
+                    const viewportWidth = window.innerWidth;
+                    const isMobile = viewportWidth <= 768;
+                    
+                    // Ancho responsivo: 80% del viewport convertido a unidades A-Frame
+                    const responsiveWidth = (viewportWidth * 0.8) / 400; // Convertir a unidades A-Frame
+                    const responsiveGeometryWidth = Math.min(responsiveWidth, 4.5); // Máximo 4.5 unidades
+                    const responsiveGeometryHeight = isMobile ? 0.8 : 0.6;
+                    
+                    // Actualizar geometría responsiva
+                    arCaptions.setAttribute('geometry', `primitive: plane; width: ${responsiveGeometryWidth}; height: ${responsiveGeometryHeight};`);
+                    arCaptions.setAttribute('width', isMobile ? '0.6' : '0.7'); // Texto más pequeño
+                    arCaptions.setAttribute('wrap-count', Math.floor(responsiveGeometryWidth * 15)); // Ajustar wrap basado en ancho
+                    
+                    // Limitar el texto para evitar overflow
+                    let displayText = text;
+                    const maxWords = isMobile ? 20 : 25; // Menos palabras en móvil
+                    const maxChars = isMobile ? 120 : 150; // Menos caracteres en móvil
+                    
+                    // Dividir en palabras y limitar
+                    const words = displayText.split(' ');
+                    if (words.length > maxWords) {
+                        displayText = words.slice(-maxWords).join(' '); // Mostrar las últimas palabras
+                    }
+                    
+                    // Limitar por caracteres también
+                    if (displayText.length > maxChars) {
+                        displayText = '...' + displayText.slice(-maxChars);
+                    }
+                    
+                    console.log('📍 Estado responsivo:', {
+                        viewportWidth,
+                        isMobile,
+                        responsiveWidth: responsiveGeometryWidth,
+                        wrapCount: Math.floor(responsiveGeometryWidth * 15),
+                        displayLength: displayText.length
+                    });
+                    
+                    arCaptions.setAttribute('value', displayText);
+                    arCaptions.setAttribute('visible', 'true');
+                    arCaptions.setAttribute('color', 'white');
+                    
+                    console.log('✅ Subtítulos responsivos actualizados');
+                } else {
+                    console.error('❌ No se encontró #ar-captions');
+                }
+            }
+            
+            function hideSubtitlesAR() {
+                // DESHABILITADO PARA DEBUG - NO OCULTAR NADA
+                console.log('🚫 hideSubtitlesAR() DESHABILITADO PARA DEBUG');
+                return;
+                
+                const arCaptions = document.querySelector('#ar-captions');
+                if (arCaptions) {
+                    arCaptions.setAttribute('visible', false);
+                    console.log('❌ Subtítulos AR ocultos');
+                }
+            }
+            
+            function showSubtitles(text) {
+                console.log('🎬 showSubtitles llamada con:', text, 'faceDetected:', faceDetected);
+                
+                // Siempre actualizar subtítulos AR, independiente de faceDetected para debug
+                if (text && text.trim()) {
+                    showSubtitlesAR(text);
+                }
+            }
+            
+            function updateARStatus(message) {
+                if (arStatusEl && faceDetected) {
+                    arStatusEl.setAttribute("value", message);
+                    arStatusEl.setAttribute("visible", true);
+                } else if (arStatusEl) {
+                    arStatusEl.setAttribute("visible", false);
+                }
+                
+                // Mantener también el status HTML
+                if (statusEl) {
+                    statusEl.textContent = message;
+                }
+            }
+            
+            // Función de prueba elegante
+            function testSubtitles() {
+                console.log('🧪 Probando subtítulos...');
+                
+                const arCaptions = document.querySelector('#ar-captions');
+                if (arCaptions) {
+                    console.log('✅ Ejecutando prueba de subtítulos');
+                    arCaptions.setAttribute('value', '🧪 Prueba de subtítulos - ¡Funciona perfectamente!');
+                    arCaptions.setAttribute('visible', 'true');
+                    arCaptions.setAttribute('color', 'gold');
+                    
+                    console.log('✅ Prueba iniciada');
+                    
+                    // Secuencia de prueba
+                    setTimeout(() => {
+                        arCaptions.setAttribute('value', '✨ Los subtítulos se ven correctamente');
+                        arCaptions.setAttribute('color', 'lightblue');
+                    }, 2000);
+                    
+                    setTimeout(() => {
+                        arCaptions.setAttribute('value', '🎭 Sistema listo - Habla para ver subtítulos');
+                        arCaptions.setAttribute('color', 'white');
+                        console.log('🧪 Prueba completada - volviendo al estado normal');
+                    }, 4000);
+                    
+                } else {
+                    console.error('❌ No se encontró el elemento de subtítulos');
+                }
+            }
+            
+            // Exponer función de prueba globalmente
+            window.testSubtitles = testSubtitles;
+
+            function updateStatus(message) {
+                if (statusEl) {
+                    statusEl.textContent = message;
+                }
+                // También actualizar status AR si hay cara detectada
+                if (faceDetected && arStatusEl) {
+                    updateARStatus(message);
+                }
+            }
+
+            function toggleTranscript() {
+                const isVisible = transcriptPanel.style.display !== 'none';
+                transcriptPanel.style.display = isVisible ? 'none' : 'block';
+            }
+
+            function updateTranscriptArea() {
+                if (transcriptText) {
+                    transcriptText.textContent = savedTranscript || 'Habla para ver la transcripción...';
+                    transcriptText.scrollTop = transcriptText.scrollHeight;
+                }
+            }
+
+            function clearTranscript() {
+                if (confirm('¿Borrar toda la transcripción?')) {
+                    savedTranscript = '';
+                    updateTranscriptArea();
+                    captionsEl.innerHTML = '';
+                    captionsEl.style.display = 'none';
+                }
+            }
+
+            // Exponer función global para el botón
+            window.clearTranscript = clearTranscript;
+
+            // Verificar compatibilidad al cargar
+            window.addEventListener('load', () => {
+                console.log('🚀 Página cargada - Verificando elementos AR...');
+                
+                // Debug del estado inicial de subtítulos AR
+                setTimeout(() => {
+                    const arCaptions = document.querySelector('#ar-captions');
+                    if (arCaptions) {
+                        console.log('📋 Estado inicial de ar-captions:', {
+                            visible: arCaptions.getAttribute('visible'),
+                            value: arCaptions.getAttribute('value'),
+                            color: arCaptions.getAttribute('color'),
+                            position: arCaptions.getAttribute('position')
+                        });
+                        
+                        // Mensaje inicial elegante
+                        arCaptions.setAttribute('visible', 'true');
+                        arCaptions.setAttribute('value', '🎭 Sistema listo - Habla para ver subtítulos');
+                        arCaptions.setAttribute('color', 'cyan');
+                        console.log('✅ Subtítulos inicializados correctamente');
+                    }
+                }, 2000); // Esperar 2 segundos para que A-Frame se inicialice
+                
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    updateStatus('Tu navegador no soporta las funcionalidades necesarias');
+                    startBtn.disabled = true;
+                } else {
+                    updateStatus('Sistema listo - Presiona Start');
+                }
+            });
+
+            // Limpiar recursos al salir
+            window.addEventListener('beforeunload', () => {
+                if (mediaStream) stopSystem();
+            });
+
+            // Listener para cambios de tamaño de pantalla - actualizar subtítulos responsivos
+            window.addEventListener('resize', () => {
+                console.log('📱 Redimensión detectada');
+                const arCaptions = document.querySelector('#ar-captions');
+                if (arCaptions && arCaptions.getAttribute('visible') === 'true') {
+                    // Reajustar dimensiones responsivas
+                    const currentText = arCaptions.getAttribute('value');
+                    if (currentText && currentText.trim()) {
+                        showSubtitlesAR(currentText);
+                    }
+                }
+            });
+        });
+    </script>
+</head>
+
+<body>
+    <!-- Panel de inicio -->
+    <div id="startPanel">
+        <h2>🎭 Subtítulos con Seguimiento Facial</h2>
+        <p>Esta aplicación combina reconocimiento facial con transcripción de voz en tiempo real.</p>
+        <p><strong>Funciones:</strong></p>
+        <ul style="text-align: left; color: #666;">
+            <li>Detecta tu cara y aplica máscara de Iron Man</li>
+            <li>Transcribe tu voz en tiempo real</li>
+            <li>Muestra subtítulos solo cuando detecta tu cara</li>
+            <li>Guarda transcripción completa</li>
+        </ul>
+        <button id="btn-start">🚀 Iniciar Sistema</button>
+    </div>
+
+    <!-- Estado del sistema -->
+    <div id="status">Sistema cargando...</div>
+
+    <!-- Controles AR -->
+    <div id="ui">
+        <button id="btn-stop">🛑 Stop</button>
+        <button id="btn-pause">⏸️ Pause</button>
+        <button id="btn-play">▶️ Play</button>
+        <button id="btn-toggle-transcript">📝 Transcripción</button>
+        <button onclick="testSubtitles()" style="background: #ff6b35;">🧪 Probar Subtítulos</button>
+    </div>
+
+    <!-- Área de subtítulos -->
+    <div id="captions"></div>
+
+    <!-- Panel de transcripción -->
+    <div id="transcriptPanel">
+        <h4>📝 Transcripción Completa</h4>
+        <div id="transcriptText">Habla para ver la transcripción...</div>
+        <button class="clear-btn" onclick="clearTranscript()">🗑️ Limpiar</button>
+    </div>
+
+    <!-- Escena A-Frame -->
+    <a-scene
+        mindar-face="autoStart: false"
+        embedded
+        color-space="sRGB"
+        renderer="colorManagement: true, physicallyCorrectLights"
+        vr-mode-ui="enabled: false"
+        device-orientation-permission-ui="enabled: false">
+
+        <a-camera active="false"></a-camera>
+
+        <!-- Assets -->
+        <a-assets>
+            <img id="ironmask" src="cara/ironman.png">
+        </a-assets>
+
+        <!-- Occluder para mejor tracking -->
+        <a-entity mindar-face-occluder
+                  material="color:#fff;opacity:0;transparent:true">
+        </a-entity>
+
+        <!-- Ancla principal para seguimiento facial -->
+        <a-entity id="face-anchor" mindar-face-target="anchorIndex: 0">
+            <!-- Máscara de Iron Man transparente -->
+            <a-plane 
+                src="#ironmask"
+                width="1.5" 
+                height="1.7"
+                position="0 0.5 0.06"
+                material="transparent: true; opacity: 0.0; depthTest: false">
+            </a-plane>
+            
+            <!-- Subtítulos AR responsivos -->
+            <a-text 
+                id="ar-captions"
+                value="Subtítulos en vivo"
+                color="white"
+                align="center"
+                width="0.9"
+                position="0 -0.5 0.3"
+                visible="true"
+                background="color: rgba(0, 0, 0, 0.85); opacity: 0.50;"
+                side="double"
+                geometry="primitive: plane; width: 6; height: 0.6;"
+                material="color: rgba(0, 0, 0, 0.85); opacity: 0.95; transparent: true;"
+                wrap-count="70"
+                overflow="hidden"
+                animation="property: scale; to: 0.90 0.90 0.90; dur: 3000; easing: easeInOutSine; loop: true; dir: alternate">
+            </a-text>
+            
+            <!-- Indicador de estado AR (opcional) -->
+            <a-text
+                id="ar-status-mini"
+                value=""
+                color="yellow"
+                align="center"
+                width="6"
+                position="0 -1.8 0.2"
+                visible="false"
+                background="color: rgba(0, 0, 0, 0.6); opacity: 0.8;"
+                geometry="primitive: plane; width: 2; height: 0.2;"
+                material="color: rgba(0, 0, 0, 0.6); opacity: 0.8; transparent: true;">
+            </a-text>
+        </a-entity>
+    </a-scene>
+</body>
+</html>
