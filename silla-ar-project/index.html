@@ -3,40 +3,256 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Silla AR</title>
+  <title>Silla AR - Selecciona Modo</title>
   <style>
-    body {
+    * {
       margin: 0;
-      background: #000;
-      color: white;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+      color: white;
+    }
+    
+    h1 {
+      font-size: 36px;
+      margin: 30px 0 10px;
+      text-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    }
+    
+    .subtitle {
+      font-size: 16px;
+      opacity: 0.9;
+      margin-bottom: 40px;
+    }
+    
+    .options {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      max-width: 500px;
+      width: 100%;
+    }
+    
+    .option-card {
+      background: rgba(255,255,255,0.15);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      padding: 25px;
+      text-decoration: none;
+      color: white;
+      transition: all 0.3s ease;
+      border: 2px solid rgba(255,255,255,0.2);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    
+    .option-card:active {
+      transform: scale(0.98);
+    }
+    
+    .option-card.recommended {
+      background: rgba(255,255,255,0.25);
+      border-color: rgba(255,255,255,0.5);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+    
+    .option-title {
+      font-size: 22px;
+      font-weight: bold;
       display: flex;
       align-items: center;
-      justify-content: center;
-      height: 100vh;
-      text-align: center;
+      gap: 10px;
     }
-    .loading {
-      font-size: 18px;
+    
+    .badge {
+      background: rgba(255,255,255,0.3);
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+    
+    .badge.recommended {
+      background: #4ade80;
+      color: white;
+    }
+    
+    .option-description {
+      font-size: 14px;
+      opacity: 0.9;
+      line-height: 1.5;
+    }
+    
+    .option-features {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 5px;
+    }
+    
+    .feature {
+      font-size: 12px;
+      padding: 4px 10px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 10px;
+    }
+    
+    .device-info {
+      margin-top: 30px;
+      padding: 15px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 15px;
+      font-size: 13px;
+      max-width: 500px;
+      width: 100%;
+    }
+    
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 5px 0;
+    }
+    
+    .footer {
+      margin-top: auto;
+      padding: 20px;
+      text-align: center;
+      font-size: 12px;
+      opacity: 0.7;
     }
   </style>
 </head>
 <body>
-  <div class="loading">Detectando dispositivo...</div>
+  <h1>🪑 Silla AR</h1>
+  <div class="subtitle">Selecciona el modo de realidad aumentada</div>
+  
+  <div class="options" id="options">
+    <!-- Se llenarán dinámicamente -->
+  </div>
+  
+  <div class="device-info" id="device-info">
+    <strong>🔍 Información del dispositivo:</strong>
+    <div class="info-row">
+      <span>Navegador:</span>
+      <span id="browser">-</span>
+    </div>
+    <div class="info-row">
+      <span>WebXR:</span>
+      <span id="webxr">-</span>
+    </div>
+    <div class="info-row">
+      <span>Sistema:</span>
+      <span id="os">-</span>
+    </div>
+  </div>
+  
+  <div class="footer">
+    Three.js + WebXR + AR.js
+  </div>
   
   <script>
-    // Detectar si es iOS Safari (no soporta WebXR)
+    // Detección de dispositivo
     const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    const isAndroid = /Android/.test(navigator.userAgent);
     const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
+    const isChrome = /Chrome/.test(navigator.userAgent);
     const hasWebXR = 'xr' in navigator;
     
-    // Si es iOS Safari o no tiene WebXR, mostrar página alternativa
-    if ((isIOS && isSafari) || !hasWebXR) {
-      window.location.href = 'index-ios.html';
-    } else {
-      // Cargar la versión WebXR
-      window.location.href = 'index-webxr.html';
+    // Actualizar info del dispositivo
+    document.getElementById('browser').textContent = 
+      isChrome ? 'Chrome' : isSafari ? 'Safari' : 'Otro';
+    document.getElementById('webxr').textContent = hasWebXR ? '✅ Sí' : '❌ No';
+    document.getElementById('os').textContent = 
+      isIOS ? 'iOS' : isAndroid ? 'Android' : 'Desktop';
+    
+    // Opciones disponibles
+    const options = [];
+    
+    // Opción 1: WebXR con Marcador (mejor estabilidad)
+    if (hasWebXR) {
+      options.push({
+        title: '🎯 AR con Marcador',
+        badge: 'RECOMENDADO',
+        badgeClass: 'recommended',
+        description: 'Usa WebXR con detección de imagen. Más estable y preciso.',
+        features: ['📌 Suavizado de movimiento', '👆 Gestos táctiles', '🎮 Controles avanzados'],
+        url: 'index-marker.html',
+        recommended: true
+      });
     }
+    
+    // Opción 2: WebXR Hit-Test (Android)
+    if (hasWebXR && isAndroid) {
+      options.push({
+        title: '🌍 AR sin Marcador',
+        badge: 'ANDROID',
+        description: 'Detecta superficies del entorno real. Requiere ARCore.',
+        features: ['🔍 Detección automática', '👆 Tap para colocar', '🚶 Camina libremente'],
+        url: 'index-webxr.html'
+      });
+    }
+    
+    // Opción 3: Vista 3D (siempre disponible)
+    options.push({
+      title: '🖼️ Vista 3D',
+      badge: 'SIN AR',
+      description: 'Visualiza el modelo 3D sin realidad aumentada.',
+      features: ['🖱️ Rotar con mouse/dedo', '✅ Funciona en todo', '⚡ Instantáneo'],
+      url: 'silla.html'
+    });
+    
+    // Si es iOS Safari, agregar nota especial
+    if (isIOS && isSafari) {
+      const iosNote = document.createElement('div');
+      iosNote.style.cssText = `
+        background: rgba(255,200,0,0.2);
+        border: 2px solid rgba(255,200,0,0.5);
+        padding: 15px;
+        border-radius: 15px;
+        margin-bottom: 20px;
+        font-size: 14px;
+        max-width: 500px;
+      `;
+      iosNote.innerHTML = `
+        <strong>⚠️ Safari iOS detectado</strong><br>
+        Safari no soporta WebXR nativamente. Para AR, descarga 
+        <a href="https://apps.apple.com/us/app/webxr-viewer/id1295998056" 
+           style="color: white; text-decoration: underline;">WebXR Viewer</a> de Mozilla.
+      `;
+      document.getElementById('options').before(iosNote);
+    }
+    
+    // Renderizar opciones
+    const optionsContainer = document.getElementById('options');
+    options.forEach(option => {
+      const card = document.createElement('a');
+      card.className = 'option-card' + (option.recommended ? ' recommended' : '');
+      card.href = option.url;
+      
+      card.innerHTML = `
+        <div class="option-title">
+          ${option.title}
+          <span class="badge ${option.badgeClass || ''}">${option.badge}</span>
+        </div>
+        <div class="option-description">${option.description}</div>
+        <div class="option-features">
+          ${option.features.map(f => `<span class="feature">${f}</span>`).join('')}
+        </div>
+      `;
+      
+      optionsContainer.appendChild(card);
+    });
   </script>
 </body>
 </html>

@@ -90,6 +90,7 @@
     <button class="control-btn" id="reset-btn">↻ Reset</button>
     <button class="control-btn" id="scale-up">🔼 +</button>
     <button class="control-btn" id="scale-down">🔽 −</button>
+    <button class="control-btn" id="smooth-btn">📌 Estable</button>
   </div>
 
   <script type="importmap">
@@ -109,10 +110,13 @@
     let scene, camera, renderer;
     let silla;
     let controller;
+    let markerGroup; // Grupo que sigue al marcador
     let selectedObject = null;
     let initialPinchDistance = null;
-    let initialScale = 1;
+    let initialScale = 0.3;
     let initialTouchRotation = null;
+    let lastMarkerPose = null;
+    let markerSmoothing = true; // Suavizado de movimiento
 
     // ============= CREAR MARCADOR =============
     function createMarkerImage() {
@@ -188,10 +192,15 @@
       dirLight.position.set(1, 2, 1);
       scene.add(dirLight);
 
+      // Crear grupo para el marcador (más estable)
+      markerGroup = new THREE.Group();
+      scene.add(markerGroup);
+
       // Crear la silla
       silla = crearSillaRealista();
-      silla.visible = false;
-      scene.add(silla);
+      silla.visible = true; // Visible dentro del grupo
+      markerGroup.add(silla);
+      markerGroup.visible = false; // El grupo se hace visible al detectar marcador
 
       // Botón AR con image tracking
       const arButton = ARButton.createButton(renderer, { 
@@ -220,6 +229,16 @@
       document.getElementById('reset-btn').addEventListener('click', resetObject);
       document.getElementById('scale-up').addEventListener('click', () => scaleObject(1.2));
       document.getElementById('scale-down').addEventListener('click', () => scaleObject(0.8));
+      
+      // Control de suavizado
+      const smoothBtn = document.getElementById('smooth-btn');
+      smoothBtn.addEventListener('click', () => {
+        markerSmoothing = !markerSmoothing;
+        smoothBtn.textContent = markerSmoothing ? '📌 Estable' : '⚡ Rápido';
+        smoothBtn.style.background = markerSmoothing ? 'rgba(100,200,100,0.9)' : 'rgba(255,200,100,0.9)';
+        document.getElementById('info').textContent = 
+          markerSmoothing ? 'Modo estable activado' : 'Modo rápido activado';
+      });
 
       // Gestos táctiles
       setupTouchControls();
@@ -416,33 +435,56 @@
           // Tracking de imágenes
           const results = frame.getImageTrackingResults();
           
-          for (const result of results) {
-            const state = result.trackingState;
-            
-            if (state === 'tracked') {
-              // Imagen detectada!
-              silla.visible = true;
+          if (results.length > 0) {
+            for (const result of results) {
+              const state = result.trackingState;
               
-              // Posicionar el objeto sobre el marcador
-              const pose = frame.getPose(result.imageSpace, renderer.xr.getReferenceSpace());
-              
-              if (pose) {
-                const position = pose.transform.position;
-                const orientation = pose.transform.orientation;
+              if (state === 'tracked') {
+                // Imagen detectada!
+                markerGroup.visible = true;
                 
-                silla.position.set(position.x, position.y, position.z);
-                silla.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w);
+                // Posicionar el grupo sobre el marcador
+                const pose = frame.getPose(result.imageSpace, renderer.xr.getReferenceSpace());
                 
-                // Elevar ligeramente sobre el marcador
-                silla.position.y += 0.1;
-                
+                if (pose) {
+                  const position = new THREE.Vector3(
+                    pose.transform.position.x,
+                    pose.transform.position.y + 0.15, // Elevar sobre el marcador
+                    pose.transform.position.z
+                  );
+                  
+                  const quaternion = new THREE.Quaternion(
+                    pose.transform.orientation.x,
+                    pose.transform.orientation.y,
+                    pose.transform.orientation.z,
+                    pose.transform.orientation.w
+                  );
+                  
+                  // Suavizado del movimiento (lerp)
+                  if (markerSmoothing && lastMarkerPose) {
+                    markerGroup.position.lerp(position, 0.3);
+                    markerGroup.quaternion.slerp(quaternion, 0.3);
+                  } else {
+                    markerGroup.position.copy(position);
+                    markerGroup.quaternion.copy(quaternion);
+                  }
+                  
+                  lastMarkerPose = { position, quaternion };
+                  
+                  document.getElementById('info').textContent = 
+                    '✓ Marcador detectado - Usa gestos para manipular';
+                }
+              } else if (state === 'emulated') {
+                // Imagen perdida pero estimada - mantener última posición
                 document.getElementById('info').textContent = 
-                  '✓ Marcador detectado - Usa gestos para manipular';
+                  '⚠️ Marcador perdido - Manteniendo posición';
               }
-            } else if (state === 'emulated') {
-              // Imagen perdida pero estimada
+            }
+          } else {
+            // No hay resultados, ocultar después de un tiempo
+            if (markerGroup.visible) {
               document.getElementById('info').textContent = 
-                '⚠️ Marcador perdido - Vuelve a apuntar';
+                '❌ Busca el marcador con la cámara';
             }
           }
         }
