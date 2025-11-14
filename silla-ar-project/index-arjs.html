@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Silla AR - Marcador QR</title>
+  <script src="https://cdn.jsdelivr.net/gh/aframevr/aframe@1.4.0/dist/aframe-master.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.5/aframe/build/aframe-ar.js"></script>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+    
+    #info {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 20px;
+      background: rgba(0,0,0,0.8);
+      color: #fff;
+      font-size: 14px;
+      z-index: 100;
+      border-radius: 8px;
+      text-align: center;
+      max-width: 80%;
+    }
+    
+    #controls {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      z-index: 100;
+    }
+    
+    .control-btn {
+      padding: 12px 20px;
+      background: rgba(255,255,255,0.9);
+      color: #333;
+      border: none;
+      border-radius: 25px;
+      font-size: 14px;
+      font-weight: bold;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    }
+    
+    .control-btn:active {
+      transform: scale(0.95);
+    }
+    
+    #marker-download {
+      position: fixed;
+      top: 70px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 20px;
+      background: rgba(102, 126, 234, 0.9);
+      color: white;
+      border-radius: 20px;
+      font-size: 12px;
+      z-index: 100;
+      text-decoration: none;
+      font-family: -apple-system, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <div id="info">📱 Apunta la cámara al marcador HIRO</div>
+  <a id="marker-download" href="https://raw.githubusercontent.com/AR-js-org/AR.js/master/data/images/hiro.png" target="_blank" download>
+    📥 Descargar Marcador HIRO
+  </a>
+  
+  <div id="controls">
+    <button class="control-btn" id="scale-up">🔼 +</button>
+    <button class="control-btn" id="scale-down">🔽 −</button>
+    <button class="control-btn" id="rotate-btn">↻ Rotar</button>
+    <button class="control-btn" id="reset-btn">⟲ Reset</button>
+  </div>
+
+  <!-- A-Frame Scene con AR.js -->
+  <a-scene
+    embedded
+    arjs="sourceType: webcam; debugUIEnabled: false; detectionMode: mono_and_matrix; matrixCodeType: 3x3;"
+    vr-mode-ui="enabled: false"
+    renderer="logarithmicDepthBuffer: true; precision: medium;"
+  >
+    <!-- Cámara -->
+    <a-entity camera></a-entity>
+
+    <!-- Marcador HIRO -->
+    <a-marker preset="hiro" id="marker">
+      <!-- Silla 3D -->
+      <a-entity id="silla" position="0 0.5 0" scale="0.5 0.5 0.5">
+        <!-- Asiento circular negro -->
+        <a-cylinder 
+          position="0 0.48 0" 
+          radius="0.38" 
+          height="0.04" 
+          color="#2e3235"
+          metalness="0.15"
+          roughness="0.7"
+        ></a-cylinder>
+
+        <!-- Respaldo turquesa (simplificado como esfera cortada) -->
+        <a-sphere 
+          position="0 0.92 -0.05" 
+          radius="0.7"
+          scale="1 1.15 1"
+          color="#206b7b"
+          metalness="0.25"
+          roughness="0.55"
+          theta-start="27"
+          theta-length="306"
+          phi-start="27"
+          phi-length="117"
+        ></a-sphere>
+
+        <!-- Patas de madera -->
+        <a-cylinder 
+          position="0.28 0.22 0.28" 
+          radius="0.04" 
+          height="0.44" 
+          color="#d7aa6a"
+          rotation="7 0 6"
+        ></a-cylinder>
+        <a-cylinder 
+          position="-0.28 0.22 0.28" 
+          radius="0.04" 
+          height="0.44" 
+          color="#d7aa6a"
+          rotation="7 0 -6"
+        ></a-cylinder>
+        <a-cylinder 
+          position="0.28 0.22 -0.28" 
+          radius="0.04" 
+          height="0.44" 
+          color="#d7aa6a"
+          rotation="-7 0 6"
+        ></a-cylinder>
+        <a-cylinder 
+          position="-0.28 0.22 -0.28" 
+          radius="0.04" 
+          height="0.44" 
+          color="#d7aa6a"
+          rotation="-7 0 -6"
+        ></a-cylinder>
+      </a-entity>
+    </a-marker>
+
+    <!-- Luces -->
+    <a-light type="ambient" color="#BBB"></a-light>
+    <a-light type="directional" color="#FFF" intensity="0.8" position="1 2 1"></a-light>
+  </a-scene>
+
+  <script>
+    // Variables
+    let currentScale = 0.5;
+    let currentRotation = 0;
+    const silla = document.querySelector('#silla');
+    const marker = document.querySelector('#marker');
+    const info = document.querySelector('#info');
+
+    // Detectar cuando se encuentra el marcador
+    marker.addEventListener('markerFound', () => {
+      info.textContent = '✅ Marcador detectado - Usa los botones para manipular';
+      info.style.background = 'rgba(0,150,0,0.8)';
+    });
+
+    marker.addEventListener('markerLost', () => {
+      info.textContent = '⚠️ Marcador perdido - Apunta nuevamente';
+      info.style.background = 'rgba(200,100,0,0.8)';
+    });
+
+    // Controles
+    document.getElementById('scale-up').addEventListener('click', () => {
+      currentScale = Math.min(currentScale * 1.2, 2.0);
+      silla.setAttribute('scale', `${currentScale} ${currentScale} ${currentScale}`);
+      updateInfo();
+    });
+
+    document.getElementById('scale-down').addEventListener('click', () => {
+      currentScale = Math.max(currentScale * 0.8, 0.1);
+      silla.setAttribute('scale', `${currentScale} ${currentScale} ${currentScale}`);
+      updateInfo();
+    });
+
+    document.getElementById('rotate-btn').addEventListener('click', () => {
+      currentRotation += 45;
+      if (currentRotation >= 360) currentRotation = 0;
+      silla.setAttribute('rotation', `0 ${currentRotation} 0`);
+      updateInfo();
+    });
+
+    document.getElementById('reset-btn').addEventListener('click', () => {
+      currentScale = 0.5;
+      currentRotation = 0;
+      silla.setAttribute('scale', '0.5 0.5 0.5');
+      silla.setAttribute('rotation', '0 0 0');
+      info.textContent = '⟲ Objeto reiniciado';
+      setTimeout(() => {
+        info.textContent = '📱 Apunta la cámara al marcador HIRO';
+      }, 2000);
+    });
+
+    function updateInfo() {
+      info.textContent = `Escala: ${(currentScale * 100).toFixed(0)}% | Rotación: ${currentRotation}°`;
+      setTimeout(() => {
+        if (marker.object3D.visible) {
+          info.textContent = '✅ Marcador detectado - Usa los botones';
+        }
+      }, 2000);
+    }
+
+    // Gestos táctiles para escalar y rotar
+    let touchStartDistance = 0;
+    let touchStartRotation = 0;
+    let touchStartScale = currentScale;
+    let touchStartAngle = 0;
+
+    document.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2 && marker.object3D.visible) {
+        // Pinch to zoom
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        touchStartDistance = Math.sqrt(dx * dx + dy * dy);
+        touchStartScale = currentScale;
+        
+        // Rotación
+        touchStartAngle = Math.atan2(dy, dx);
+        touchStartRotation = currentRotation;
+      }
+    });
+
+    document.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 2 && marker.object3D.visible) {
+        e.preventDefault();
+        
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        // Escalar
+        if (touchStartDistance > 0) {
+          const scaleFactor = distance / touchStartDistance;
+          currentScale = Math.max(0.1, Math.min(touchStartScale * scaleFactor, 2.0));
+          silla.setAttribute('scale', `${currentScale} ${currentScale} ${currentScale}`);
+        }
+        
+        // Rotar
+        const angle = Math.atan2(dy, dx);
+        const angleDiff = (angle - touchStartAngle) * (180 / Math.PI);
+        currentRotation = (touchStartRotation + angleDiff) % 360;
+        silla.setAttribute('rotation', `0 ${currentRotation} 0`);
+        
+        info.textContent = `Escala: ${(currentScale * 100).toFixed(0)}% | Rotación: ${currentRotation.toFixed(0)}°`;
+      }
+    });
+
+    document.addEventListener('touchend', () => {
+      touchStartDistance = 0;
+    });
+  </script>
+</body>
+</html>

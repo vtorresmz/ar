@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Silla AR - Image Tracking</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      touch-action: none;
+    }
+    
+    #info {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 20px;
+      background: rgba(0,0,0,0.8);
+      color: #fff;
+      font-size: 14px;
+      z-index: 100;
+      border-radius: 8px;
+      text-align: center;
+      max-width: 80%;
+    }
+    
+    #controls {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      z-index: 100;
+    }
+    
+    .control-btn {
+      padding: 12px 20px;
+      background: rgba(255,255,255,0.9);
+      color: #333;
+      border: none;
+      border-radius: 25px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    }
+    
+    .control-btn:active {
+      transform: scale(0.95);
+    }
+    
+    #loading {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-size: 16px;
+      z-index: 50;
+      text-align: center;
+    }
+    
+    #marker-download {
+      position: fixed;
+      top: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 20px;
+      background: rgba(102, 126, 234, 0.9);
+      color: white;
+      border: none;
+      border-radius: 20px;
+      font-size: 12px;
+      z-index: 100;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="info">Apunta la cámara al marcador</div>
+  <div id="loading">Cargando AR...<br><small>Permite acceso a la cámara</small></div>
+  <a id="marker-download" href="#" download="marker.png">📥 Descargar Marcador</a>
+  
+  <div id="controls" style="display: none;">
+    <button class="control-btn" id="reset-btn">↻ Reset</button>
+    <button class="control-btn" id="scale-up">🔼 +</button>
+    <button class="control-btn" id="scale-down">🔽 −</button>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.167.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.167.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { ARButton } from 'three/addons/webxr/ARButton.js';
+
+    // ============= VARIABLES GLOBALES =============
+    let scene, camera, renderer;
+    let silla;
+    let controller;
+    let selectedObject = null;
+    let initialPinchDistance = null;
+    let initialScale = 1;
+    let initialTouchRotation = null;
+
+    // ============= CREAR MARCADOR =============
+    function createMarkerImage() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+      
+      // Fondo blanco
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, 512, 512);
+      
+      // Borde negro
+      ctx.strokeStyle = 'black';
+      ctx.lineWidth = 20;
+      ctx.strokeRect(10, 10, 492, 492);
+      
+      // Patrón único para tracking
+      ctx.fillStyle = 'black';
+      
+      // Cuadrados en las esquinas
+      ctx.fillRect(50, 50, 100, 100);
+      ctx.fillRect(362, 50, 100, 100);
+      ctx.fillRect(50, 362, 100, 100);
+      
+      // Patrón central único
+      ctx.fillRect(200, 200, 112, 112);
+      ctx.fillStyle = 'white';
+      ctx.fillRect(220, 220, 72, 72);
+      ctx.fillStyle = 'black';
+      ctx.font = 'bold 40px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('AR', 256, 270);
+      
+      // Círculo turquesa (identificador de color)
+      ctx.fillStyle = '#206b7b';
+      ctx.beginPath();
+      ctx.arc(400, 400, 40, 0, Math.PI * 2);
+      ctx.fill();
+      
+      return canvas.toDataURL('image/png');
+    }
+
+    // Configurar descarga del marcador
+    document.getElementById('marker-download').href = createMarkerImage();
+
+    // ============= INICIALIZACIÓN =============
+    function init() {
+      scene = new THREE.Scene();
+
+      camera = new THREE.PerspectiveCamera(
+        70,
+        window.innerWidth / window.innerHeight,
+        0.01,
+        20
+      );
+
+      renderer = new THREE.WebGLRenderer({ 
+        antialias: true, 
+        alpha: true 
+      });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      renderer.outputEncoding = THREE.sRGBEncoding;
+      document.body.appendChild(renderer.domElement);
+
+      // Luces
+      const ambientLight = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+      scene.add(ambientLight);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      dirLight.position.set(1, 2, 1);
+      scene.add(dirLight);
+
+      // Crear la silla
+      silla = crearSillaRealista();
+      silla.visible = false;
+      scene.add(silla);
+
+      // Botón AR con image tracking
+      const arButton = ARButton.createButton(renderer, { 
+        requiredFeatures: ['image-tracking'],
+        trackedImages: [
+          {
+            image: createMarkerImageBitmap(),
+            widthInMeters: 0.2 // 20cm de ancho
+          }
+        ],
+        optionalFeatures: ['dom-overlay'],
+        domOverlay: { root: document.body }
+      });
+      document.body.appendChild(arButton);
+
+      // Controller
+      controller = renderer.xr.getController(0);
+      controller.addEventListener('select', onSelect);
+      scene.add(controller);
+
+      // Event listeners para sesión AR
+      renderer.xr.addEventListener('sessionstart', onSessionStart);
+      renderer.xr.addEventListener('sessionend', onSessionEnd);
+
+      // Controles
+      document.getElementById('reset-btn').addEventListener('click', resetObject);
+      document.getElementById('scale-up').addEventListener('click', () => scaleObject(1.2));
+      document.getElementById('scale-down').addEventListener('click', () => scaleObject(0.8));
+
+      // Gestos táctiles
+      setupTouchControls();
+
+      window.addEventListener('resize', onWindowResize);
+      
+      document.getElementById('loading').style.display = 'none';
+    }
+
+    // ============= CREAR BITMAP DEL MARCADOR =============
+    async function createMarkerImageBitmap() {
+      const img = new Image();
+      img.src = createMarkerImage();
+      await new Promise(resolve => img.onload = resolve);
+      return await createImageBitmap(img);
+    }
+
+    // ============= CREAR SILLA 3D =============
+    function crearSillaRealista() {
+      const group = new THREE.Group();
+      group.scale.set(0.3, 0.3, 0.3); // Más pequeña para AR
+
+      const seatHeight = 0.48;
+      const seatRadius = 0.38;
+
+      // Cojín circular negro
+      const cushionGeom = new THREE.CylinderGeometry(seatRadius, seatRadius, 0.04, 48);
+      const cushionMat = new THREE.MeshStandardMaterial({
+        color: 0x2e3235,
+        roughness: 0.7,
+        metalness: 0.15
+      });
+      const cushion = new THREE.Mesh(cushionGeom, cushionMat);
+      cushion.position.y = seatHeight;
+      group.add(cushion);
+
+      // Respaldo turquesa
+      const shellGeom = new THREE.SphereGeometry(
+        0.7, 48, 32,
+        Math.PI * 0.15, Math.PI * 1.7,
+        Math.PI * 0.15, Math.PI * 0.65
+      );
+      const shellMat = new THREE.MeshStandardMaterial({
+        color: 0x206b7b,
+        roughness: 0.55,
+        metalness: 0.25,
+        side: THREE.FrontSide
+      });
+      const shell = new THREE.Mesh(shellGeom, shellMat);
+      shell.scale.set(1.0, 1.15, 1.0);
+      shell.position.y = seatHeight + 0.22;
+      group.add(shell);
+
+      // Interior oscuro
+      const innerMat = new THREE.MeshStandardMaterial({
+        color: 0x141b20,
+        roughness: 0.6,
+        metalness: 0.1,
+        side: THREE.BackSide
+      });
+      const inner = new THREE.Mesh(shellGeom.clone(), innerMat);
+      inner.scale.set(0.96, 1.12, 0.96);
+      inner.position.copy(shell.position);
+      group.add(inner);
+
+      // Patas de madera
+      const legHeight = seatHeight - 0.04;
+      const legRadius = 0.04;
+      const legGeom = new THREE.CylinderGeometry(legRadius, legRadius, legHeight, 16);
+      const legMat = new THREE.MeshStandardMaterial({
+        color: 0xd7aa6a,
+        roughness: 0.7,
+        metalness: 0.1
+      });
+
+      const legOffset = 0.28;
+      const legsData = [
+        { x:  legOffset, z:  legOffset },
+        { x: -legOffset, z:  legOffset },
+        { x:  legOffset, z: -legOffset },
+        { x: -legOffset, z: -legOffset }
+      ];
+
+      legsData.forEach(({ x, z }) => {
+        const leg = new THREE.Mesh(legGeom, legMat);
+        leg.position.set(x, legHeight / 2, z);
+        const tiltX = (z > 0 ? -1 : 1) * 0.12;
+        const tiltZ = (x > 0 ?  1 : -1) * 0.10;
+        leg.rotation.x = tiltX;
+        leg.rotation.z = tiltZ;
+        group.add(leg);
+      });
+
+      return group;
+    }
+
+    // ============= GESTOS TÁCTILES =============
+    function setupTouchControls() {
+      let touches = [];
+
+      renderer.domElement.addEventListener('touchstart', (e) => {
+        touches = Array.from(e.touches);
+        
+        if (touches.length === 2 && silla.visible) {
+          // Pinch para escalar
+          const dx = touches[0].clientX - touches[1].clientX;
+          const dy = touches[0].clientY - touches[1].clientY;
+          initialPinchDistance = Math.sqrt(dx * dx + dy * dy);
+          initialScale = silla.scale.x;
+        } else if (touches.length === 1 && silla.visible) {
+          // Rotación con un dedo
+          initialTouchRotation = { x: touches[0].clientX, y: touches[0].clientY };
+        }
+      });
+
+      renderer.domElement.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        touches = Array.from(e.touches);
+
+        if (touches.length === 2 && initialPinchDistance && silla.visible) {
+          // Escalar con pinch
+          const dx = touches[0].clientX - touches[1].clientX;
+          const dy = touches[0].clientY - touches[1].clientY;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          const scale = (distance / initialPinchDistance) * initialScale;
+          
+          silla.scale.setScalar(Math.max(0.1, Math.min(scale, 1.0)));
+          
+          document.getElementById('info').textContent = 
+            `Escala: ${(silla.scale.x * 100).toFixed(0)}%`;
+        } else if (touches.length === 1 && initialTouchRotation && silla.visible) {
+          // Rotar con un dedo
+          const deltaX = touches[0].clientX - initialTouchRotation.x;
+          silla.rotation.y += deltaX * 0.01;
+          initialTouchRotation = { x: touches[0].clientX, y: touches[0].clientY };
+        }
+      });
+
+      renderer.domElement.addEventListener('touchend', () => {
+        if (touches.length < 2) {
+          initialPinchDistance = null;
+        }
+        if (touches.length === 0) {
+          initialTouchRotation = null;
+        }
+      });
+    }
+
+    // ============= EVENTOS DE SESIÓN =============
+    function onSessionStart() {
+      document.getElementById('info').textContent = 'Busca el marcador con la cámara';
+      document.getElementById('controls').style.display = 'flex';
+      document.getElementById('marker-download').style.display = 'none';
+    }
+
+    function onSessionEnd() {
+      document.getElementById('info').textContent = 'Apunta la cámara al marcador';
+      document.getElementById('controls').style.display = 'none';
+      document.getElementById('marker-download').style.display = 'block';
+      silla.visible = false;
+    }
+
+    // ============= SELECCIONAR OBJETO =============
+    function onSelect() {
+      if (silla.visible) {
+        selectedObject = selectedObject === silla ? null : silla;
+        document.getElementById('info').textContent = 
+          selectedObject ? 'Objeto seleccionado - Usa gestos' : 'Toca para seleccionar';
+      }
+    }
+
+    // ============= CONTROLES =============
+    function resetObject() {
+      silla.scale.set(0.3, 0.3, 0.3);
+      silla.rotation.set(0, 0, 0);
+      document.getElementById('info').textContent = 'Objeto reiniciado';
+    }
+
+    function scaleObject(factor) {
+      if (silla.visible) {
+        const newScale = silla.scale.x * factor;
+        silla.scale.setScalar(Math.max(0.1, Math.min(newScale, 1.0)));
+        document.getElementById('info').textContent = 
+          `Escala: ${(silla.scale.x * 100).toFixed(0)}%`;
+      }
+    }
+
+    // ============= LOOP DE ANIMACIÓN =============
+    function animate(timestamp, frame) {
+      if (frame) {
+        const session = renderer.xr.getSession();
+        
+        if (session) {
+          // Tracking de imágenes
+          const results = frame.getImageTrackingResults();
+          
+          for (const result of results) {
+            const state = result.trackingState;
+            
+            if (state === 'tracked') {
+              // Imagen detectada!
+              silla.visible = true;
+              
+              // Posicionar el objeto sobre el marcador
+              const pose = frame.getPose(result.imageSpace, renderer.xr.getReferenceSpace());
+              
+              if (pose) {
+                const position = pose.transform.position;
+                const orientation = pose.transform.orientation;
+                
+                silla.position.set(position.x, position.y, position.z);
+                silla.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w);
+                
+                // Elevar ligeramente sobre el marcador
+                silla.position.y += 0.1;
+                
+                document.getElementById('info').textContent = 
+                  '✓ Marcador detectado - Usa gestos para manipular';
+              }
+            } else if (state === 'emulated') {
+              // Imagen perdida pero estimada
+              document.getElementById('info').textContent = 
+                '⚠️ Marcador perdido - Vuelve a apuntar';
+            }
+          }
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    // ============= RESPONSIVE =============
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // ============= INICIAR =============
+    init();
+    renderer.setAnimationLoop(animate);
+  </script>
+</body>
+</html>
