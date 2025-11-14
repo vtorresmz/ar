@@ -137,7 +137,7 @@
       arButton = document.getElementById('ar-button');
       
       // Verificar soporte AR
-      if ('xr' in navigator) {
+      if ('xr' in navigator && navigator.xr) {
         navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
           if (supported) {
             arButton.classList.add('enabled');
@@ -145,13 +145,14 @@
             document.getElementById('loading').style.display = 'none';
             document.getElementById('info').textContent = 'Presiona el botón para iniciar AR';
           } else {
-            mostrarError('AR no soportado en este dispositivo');
+            mostrarError('AR no soportado en este dispositivo. Asegúrate de estar en Safari iOS 13+ o Chrome Android con ARCore.');
           }
-        }).catch(() => {
-          mostrarError('Error al verificar soporte AR');
+        }).catch((error) => {
+          console.error('Error al verificar soporte AR:', error);
+          mostrarError('Error al verificar soporte AR: ' + error.message);
         });
       } else {
-        mostrarError('WebXR no disponible. Usa Chrome o Safari iOS 13+');
+        mostrarError('WebXR no disponible. Requisitos: Safari iOS 13+ con HTTPS o Chrome Android con ARCore.');
       }
 
       // Responsive
