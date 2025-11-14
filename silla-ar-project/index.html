@@ -78,6 +78,7 @@
 <body>
   <div id="info">Apunta tu cámara a una superficie plana</div>
   <div id="loading">Cargando<span class="dot-pulse">...</span></div>
+  <div id="debug" style="position: fixed; bottom: 80px; left: 10px; right: 10px; padding: 8px; background: rgba(0,0,0,0.7); color: #0f0; font-size: 10px; font-family: monospace; display: none; z-index: 99; max-height: 150px; overflow-y: auto;"></div>
   <button id="ar-button">Iniciar AR 📱</button>
 
   <!-- Three.js desde CDN -->
@@ -91,6 +92,16 @@
     let reticle; // Marcador de posición en AR
     let hitTestSource = null;
     let hitTestSourceRequested = false;
+    let debugPanel;
+
+    // ============= DEBUG =============
+    function log(msg) {
+      console.log(msg);
+      if (debugPanel) {
+        debugPanel.innerHTML += msg + '<br>';
+        debugPanel.scrollTop = debugPanel.scrollHeight;
+      }
+    }
 
     // ============= INICIALIZACIÓN =============
     function init() {
@@ -135,24 +146,44 @@
 
       // Botón AR
       arButton = document.getElementById('ar-button');
+      debugPanel = document.getElementById('debug');
+      
+      // Información del dispositivo
+      log('User Agent: ' + navigator.userAgent);
+      log('URL: ' + window.location.href);
+      log('HTTPS: ' + (window.location.protocol === 'https:'));
+      log('Navigator.xr: ' + ('xr' in navigator));
       
       // Verificar soporte AR
       if ('xr' in navigator && navigator.xr) {
+        log('WebXR API detectada');
+        
+        // Mostrar panel de debug en iOS
+        if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+          debugPanel.style.display = 'block';
+        }
+        
         navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+          log('immersive-ar soportado: ' + supported);
+          
           if (supported) {
             arButton.classList.add('enabled');
             arButton.addEventListener('click', onARButtonClick);
             document.getElementById('loading').style.display = 'none';
             document.getElementById('info').textContent = 'Presiona el botón para iniciar AR';
+            log('✓ AR listo para usar');
           } else {
-            mostrarError('AR no soportado en este dispositivo. Asegúrate de estar en Safari iOS 13+ o Chrome Android con ARCore.');
+            log('✗ AR no soportado en este navegador/dispositivo');
+            mostrarError('AR no soportado. Usa Safari en iOS 13+ o Chrome Android con ARCore.');
           }
         }).catch((error) => {
+          log('✗ Error al verificar soporte: ' + error.message);
           console.error('Error al verificar soporte AR:', error);
-          mostrarError('Error al verificar soporte AR: ' + error.message);
+          mostrarError('Error: ' + error.message + '. Verifica permisos de cámara y sensores.');
         });
       } else {
-        mostrarError('WebXR no disponible. Requisitos: Safari iOS 13+ con HTTPS o Chrome Android con ARCore.');
+        log('✗ WebXR no disponible en navigator');
+        mostrarError('WebXR no disponible. Usa Safari iOS 13+ o Chrome Android.');
       }
 
       // Responsive
@@ -257,6 +288,8 @@
     // ============= BOTÓN AR =============
     function onARButtonClick() {
       if (!renderer.xr.isPresenting) {
+        log('Intentando iniciar sesión AR...');
+        
         const sessionInit = {
           requiredFeatures: ['hit-test'],
           optionalFeatures: ['dom-overlay'],
@@ -264,10 +297,21 @@
         };
 
         navigator.xr.requestSession('immersive-ar', sessionInit)
-          .then(onSessionStarted)
+          .then((session) => {
+            log('✓ Sesión AR iniciada');
+            onSessionStarted(session);
+          })
           .catch((err) => {
+            log('✗ Error al iniciar AR: ' + err.name + ' - ' + err.message);
             console.error('Error al iniciar AR:', err);
-            mostrarError('No se pudo iniciar AR: ' + err.message);
+            
+            let errorMsg = 'No se pudo iniciar AR: ' + err.message;
+            if (err.name === 'NotAllowedError') {
+              errorMsg = 'Permisos denegados. Permite acceso a la cámara y sensores en Ajustes.';
+            } else if (err.name === 'NotSupportedError') {
+              errorMsg = 'AR no soportado en este dispositivo.';
+            }
+            mostrarError(errorMsg);
           });
       }
     }
