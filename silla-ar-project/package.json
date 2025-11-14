@@ -1,0 +1,13 @@
+{
+  "name": "silla-ar-project",
+  "version": "1.0.0",
+  "description": "Proyecto AR de silla con Three.js y WebXR",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "tunnel": "npx ngrok http 8080"
+  },
+  "keywords": ["ar", "webxr", "threejs"],
+  "author": "",
+  "license": "MIT"
+}
