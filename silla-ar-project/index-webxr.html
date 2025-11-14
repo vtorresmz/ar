@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Silla AR - Realidad Aumentada</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      touch-action: none;
+    }
+    
+    #info {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 20px;
+      background: rgba(0,0,0,0.8);
+      color: #fff;
+      font-size: 14px;
+      z-index: 100;
+      border-radius: 8px;
+      text-align: center;
+      max-width: 80%;
+    }
+    
+    #ar-button {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 16px 40px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 50px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      z-index: 100;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      display: none;
+    }
+    
+    #ar-button:active {
+      transform: translateX(-50%) scale(0.95);
+    }
+    
+    #ar-button.enabled {
+      display: block;
+    }
+    
+    #loading {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-size: 16px;
+      z-index: 50;
+    }
+    
+    .dot-pulse {
+      display: inline-block;
+      animation: pulse 1.5s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+  </style>
+</head>
+<body>
+  <div id="info">Apunta tu cámara a una superficie plana</div>
+  <div id="loading">Cargando<span class="dot-pulse">...</span></div>
+  <div id="debug" style="position: fixed; bottom: 80px; left: 10px; right: 10px; padding: 8px; background: rgba(0,0,0,0.7); color: #0f0; font-size: 10px; font-family: monospace; display: none; z-index: 99; max-height: 150px; overflow-y: auto;"></div>
+  <button id="ar-button">Iniciar AR 📱</button>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.167.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.167.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { ARButton } from 'three/addons/webxr/ARButton.js';
+
+    // ============= VARIABLES GLOBALES =============
+    let scene, camera, renderer;
+    let silla;
+    let controller;
+    let reticle; // Marcador de posición en AR
+    let hitTestSource = null;
+    let hitTestSourceRequested = false;
+    let debugPanel;
+
+    // ============= DEBUG =============
+    function log(msg) {
+      console.log(msg);
+      if (debugPanel) {
+        debugPanel.innerHTML += msg + '<br>';
+        debugPanel.scrollTop = debugPanel.scrollHeight;
+      }
+    }
+
+    // ============= INICIALIZACIÓN =============
+    function init() {
+      // Escena
+      scene = new THREE.Scene();
+
+      // Cámara
+      camera = new THREE.PerspectiveCamera(
+        70,
+        window.innerWidth / window.innerHeight,
+        0.01,
+        20
+      );
+
+      // Renderer con XR habilitado
+      renderer = new THREE.WebGLRenderer({ 
+        antialias: true, 
+        alpha: true 
+      });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      renderer.outputEncoding = THREE.sRGBEncoding;
+      document.body.appendChild(renderer.domElement);
+
+      // Luz ambiental suave
+      const ambientLight = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+      scene.add(ambientLight);
+
+      // Luz direccional para sombras
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      dirLight.position.set(1, 2, 1);
+      scene.add(dirLight);
+
+      // Crear retícula (indicador donde aparecerá el objeto)
+      crearReticula();
+
+      // Crear la silla
+      silla = crearSillaRealista();
+      silla.visible = false; // Oculta hasta que se coloque
+      scene.add(silla);
+
+      // Botón AR usando ARButton oficial
+      debugPanel = document.getElementById('debug');
+      
+      // Información del dispositivo
+      log('User Agent: ' + navigator.userAgent);
+      log('URL: ' + window.location.href);
+      log('HTTPS: ' + (window.location.protocol === 'https:'));
+      log('Navigator.xr: ' + ('xr' in navigator));
+      
+      // Ocultar elementos temporales
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('ar-button').style.display = 'none';
+      
+      // Usar ARButton oficial de Three.js
+      const arButtonElement = ARButton.createButton(renderer, { 
+        requiredFeatures: ['hit-test'],
+        optionalFeatures: ['dom-overlay'],
+        domOverlay: { root: document.body }
+      });
+      document.body.appendChild(arButtonElement);
+      
+      // Mostrar panel de debug en iOS
+      if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+        debugPanel.style.display = 'block';
+        log('✓ Dispositivo iOS detectado');
+      }
+      
+      log('✓ ARButton creado, verificando soporte...');
+
+      // Controller para detectar el tap
+      controller = renderer.xr.getController(0);
+      controller.addEventListener('select', onSelect);
+      scene.add(controller);
+
+      // Responsive
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    // ============= RETÍCULA (Indicador de posición) =============
+    function crearReticula() {
+      const geometry = new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2);
+      const material = new THREE.MeshBasicMaterial({ 
+        color: 0x00ff00,
+        transparent: true,
+        opacity: 0.7
+      });
+      reticle = new THREE.Mesh(geometry, material);
+      reticle.matrixAutoUpdate = false;
+      reticle.visible = false;
+      scene.add(reticle);
+    }
+
+    // ============= CREAR SILLA 3D =============
+    function crearSillaRealista() {
+      const group = new THREE.Group();
+      
+      // Escala para AR (más pequeña)
+      group.scale.set(0.5, 0.5, 0.5);
+
+      const seatHeight = 0.48;
+      const seatRadius = 0.38;
+
+      // Cojín circular negro
+      const cushionGeom = new THREE.CylinderGeometry(seatRadius, seatRadius, 0.04, 48);
+      const cushionMat = new THREE.MeshStandardMaterial({
+        color: 0x2e3235,
+        roughness: 0.7,
+        metalness: 0.15
+      });
+      const cushion = new THREE.Mesh(cushionGeom, cushionMat);
+      cushion.position.y = seatHeight;
+      group.add(cushion);
+
+      // Respaldo turquesa
+      const shellGeom = new THREE.SphereGeometry(
+        0.7, 48, 32,
+        Math.PI * 0.15, Math.PI * 1.7,
+        Math.PI * 0.15, Math.PI * 0.65
+      );
+      const shellMat = new THREE.MeshStandardMaterial({
+        color: 0x206b7b,
+        roughness: 0.55,
+        metalness: 0.25,
+        side: THREE.FrontSide
+      });
+      const shell = new THREE.Mesh(shellGeom, shellMat);
+      shell.scale.set(1.0, 1.15, 1.0);
+      shell.position.y = seatHeight + 0.22;
+      group.add(shell);
+
+      // Interior oscuro
+      const innerMat = new THREE.MeshStandardMaterial({
+        color: 0x141b20,
+        roughness: 0.6,
+        metalness: 0.1,
+        side: THREE.BackSide
+      });
+      const inner = new THREE.Mesh(shellGeom.clone(), innerMat);
+      inner.scale.set(0.96, 1.12, 0.96);
+      inner.position.copy(shell.position);
+      group.add(inner);
+
+      // Patas de madera
+      const legHeight = seatHeight - 0.04;
+      const legRadius = 0.04;
+      const legGeom = new THREE.CylinderGeometry(legRadius, legRadius, legHeight, 16);
+      const legMat = new THREE.MeshStandardMaterial({
+        color: 0xd7aa6a,
+        roughness: 0.7,
+        metalness: 0.1
+      });
+
+      const legOffset = 0.28;
+      const legsData = [
+        { x:  legOffset, z:  legOffset },
+        { x: -legOffset, z:  legOffset },
+        { x:  legOffset, z: -legOffset },
+        { x: -legOffset, z: -legOffset }
+      ];
+
+      legsData.forEach(({ x, z }) => {
+        const leg = new THREE.Mesh(legGeom, legMat);
+        leg.position.set(x, legHeight / 2, z);
+        const tiltX = (z > 0 ? -1 : 1) * 0.12;
+        const tiltZ = (x > 0 ?  1 : -1) * 0.10;
+        leg.rotation.x = tiltX;
+        leg.rotation.z = tiltZ;
+        group.add(leg);
+      });
+
+      return group;
+    }
+
+    // ============= TAP PARA COLOCAR =============
+    function onSelect() {
+      if (reticle.visible) {
+        // Colocar la silla en la posición de la retícula
+        silla.position.setFromMatrixPosition(reticle.matrix);
+        silla.visible = true;
+        
+        document.getElementById('info').textContent = '¡Silla colocada! Muévete para verla mejor';
+      }
+    }
+
+    // ============= LOOP DE ANIMACIÓN =============
+    function animate(timestamp, frame) {
+      if (frame) {
+        const referenceSpace = renderer.xr.getReferenceSpace();
+        const session = renderer.xr.getSession();
+
+        // Solicitar hit test source si aún no se ha hecho
+        if (hitTestSourceRequested === false) {
+          session.requestReferenceSpace('viewer').then((referenceSpace) => {
+            session.requestHitTestSource({ space: referenceSpace }).then((source) => {
+              hitTestSource = source;
+              log('✓ Hit test source creado');
+            });
+          });
+
+          session.addEventListener('end', () => {
+            hitTestSourceRequested = false;
+            hitTestSource = null;
+            reticle.visible = false;
+            silla.visible = false;
+            log('✓ Sesión AR terminada');
+          });
+
+          hitTestSourceRequested = true;
+        }
+
+        // Hit testing para detectar superficies
+        if (hitTestSource) {
+          const hitTestResults = frame.getHitTestResults(hitTestSource);
+
+          if (hitTestResults.length > 0) {
+            const hit = hitTestResults[0];
+            const pose = hit.getPose(referenceSpace);
+
+            if (pose) {
+              reticle.visible = true;
+              reticle.matrix.fromArray(pose.transform.matrix);
+            }
+          } else {
+            reticle.visible = false;
+          }
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    // ============= RESPONSIVE =============
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // ============= ERRORES =============
+    function mostrarError(mensaje) {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('info').textContent = mensaje;
+      document.getElementById('info').style.background = 'rgba(255,0,0,0.8)';
+    }
+
+    // ============= INICIAR =============
+    init();
+    renderer.setAnimationLoop(animate);
+  </script>
+</body>
+</html>

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Silla AR - iOS</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      color: white;
+    }
+    
+    h1 {
+      font-size: 32px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    
+    .info {
+      text-align: center;
+      margin-bottom: 30px;
+      font-size: 16px;
+      max-width: 400px;
+      line-height: 1.5;
+    }
+    
+    .preview {
+      width: 300px;
+      height: 300px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 20px;
+      margin-bottom: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(10px);
+    }
+    
+    #ar-link {
+      display: inline-block;
+      padding: 18px 50px;
+      background: white;
+      color: #667eea;
+      text-decoration: none;
+      border-radius: 50px;
+      font-size: 18px;
+      font-weight: bold;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      transition: transform 0.2s;
+    }
+    
+    #ar-link:active {
+      transform: scale(0.95);
+    }
+    
+    .note {
+      margin-top: 30px;
+      font-size: 14px;
+      opacity: 0.8;
+      text-align: center;
+      max-width: 400px;
+    }
+    
+    canvas {
+      width: 100%;
+      height: 100%;
+      border-radius: 20px;
+    }
+    
+    .webxr-option {
+      margin-top: 20px;
+      padding: 15px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 10px;
+      text-align: center;
+    }
+    
+    .webxr-option a {
+      color: white;
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <h1>🪑 Silla AR</h1>
+  
+  <div class="info">
+    Safari en iOS no soporta WebXR actualmente. Aquí tienes alternativas:
+  </div>
+  
+  <div class="preview">
+    <canvas id="preview"></canvas>
+  </div>
+  
+  <div class="webxr-option">
+    <strong>Opción 1: Modelo 3D Interactivo</strong><br>
+    <small>Vista previa arriba - puedes rotarla con el dedo</small>
+  </div>
+  
+  <div class="webxr-option">
+    <strong>Opción 2: WebXR Viewer</strong><br>
+    <small>Descarga la app <a href="https://apps.apple.com/us/app/webxr-viewer/id1295998056" target="_blank">WebXR Viewer</a> de Mozilla</small>
+  </div>
+  
+  <div class="webxr-option">
+    <strong>Opción 3: Chrome en Android</strong><br>
+    <small>Abre <a href="https://vtorresmz.github.io/ar/silla-ar-project/index.html">este link</a> en Chrome Android</small>
+  </div>
+  
+  <div class="note">
+    💡 iOS Safari no soporta WebXR. Para AR en iOS necesitas usar Quick Look con archivos USDZ o la app WebXR Viewer.
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+    // Mini preview 3D
+    const canvas = document.getElementById('preview');
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 50);
+    camera.position.set(0.6, 1.1, 2.1);
+    
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setSize(250, 250);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    
+    const ambientLight = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+    scene.add(ambientLight);
+    
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(1, 2, 1);
+    scene.add(dirLight);
+    
+    // Crear silla simplificada
+    const group = new THREE.Group();
+    
+    // Asiento
+    const seatGeom = new THREE.CylinderGeometry(0.38, 0.38, 0.04, 32);
+    const seatMat = new THREE.MeshStandardMaterial({ color: 0x2e3235 });
+    const seat = new THREE.Mesh(seatGeom, seatMat);
+    seat.position.y = 0.48;
+    group.add(seat);
+    
+    // Respaldo
+    const shellGeom = new THREE.SphereGeometry(0.7, 32, 24, Math.PI * 0.15, Math.PI * 1.7, Math.PI * 0.15, Math.PI * 0.65);
+    const shellMat = new THREE.MeshStandardMaterial({ color: 0x206b7b });
+    const shell = new THREE.Mesh(shellGeom, shellMat);
+    shell.scale.set(1.0, 1.15, 1.0);
+    shell.position.y = 0.7;
+    group.add(shell);
+    
+    scene.add(group);
+    
+    // Touch rotation
+    let isDragging = false;
+    let previousTouch = null;
+    
+    canvas.addEventListener('touchstart', (e) => {
+      isDragging = true;
+      previousTouch = e.touches[0];
+    });
+    
+    canvas.addEventListener('touchmove', (e) => {
+      if (isDragging && previousTouch) {
+        const touch = e.touches[0];
+        const deltaX = touch.clientX - previousTouch.clientX;
+        group.rotation.y += deltaX * 0.01;
+        previousTouch = touch;
+      }
+      e.preventDefault();
+    });
+    
+    canvas.addEventListener('touchend', () => {
+      isDragging = false;
+      previousTouch = null;
+    });
+    
+    function animate() {
+      requestAnimationFrame(animate);
+      if (!isDragging) {
+        group.rotation.y += 0.005;
+      }
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
