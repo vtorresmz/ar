@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Silla 3D - Three.js</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+      font-family: system-ui, sans-serif;
+    }
+    #info {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      padding: 6px 10px;
+      background: rgba(0,0,0,0.5);
+      color: #fff;
+      font-size: 12px;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <div id="info">Arrastra con el mouse para girar la silla · Rueda para acercar/alejar</div>
+
+  <!-- Cargamos Three y OrbitControls desde CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <script>
+    // ============= ESCENA, CÁMARA, RENDERER =============
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xf4f4f4); // fondo claro tipo pared
+
+    const camera = new THREE.PerspectiveCamera(
+      45,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      50
+    );
+    // Vista 3/4 similar a la foto
+    camera.position.set(0.6, 1.1, 2.1);
+    camera.lookAt(0, 0.6, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 0.6, 0);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+
+    // ======================= LUCES =======================
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x404040, 1.0);
+    hemiLight.position.set(0, 3, 0);
+    scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.65);
+    dirLight.position.set(2, 4, 2);
+    scene.add(dirLight);
+
+    // ======================= PISO ========================
+    (function crearPiso() {
+      const floorGeom = new THREE.PlaneGeometry(4, 4);
+      const floorMat  = new THREE.MeshStandardMaterial({
+        color: 0x78563a, // marrón similar al de la foto
+        roughness: 0.9,
+        metalness: 0.0
+      });
+      const floor = new THREE.Mesh(floorGeom, floorMat);
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.y = 0;
+      scene.add(floor);
+    })();
+
+    // ==================== SILLA 3D =======================
+    function crearSillaRealista() {
+      const group = new THREE.Group();
+
+      const seatHeight = 0.48;   // altura del asiento
+      const seatRadius = 0.38;   // radio del cojín circular
+
+      // Cojín circular negro (asiento)
+      const cushionGeom = new THREE.CylinderGeometry(seatRadius, seatRadius, 0.04, 48);
+      const cushionMat  = new THREE.MeshStandardMaterial({
+        color: 0x2e3235,   // gris muy oscuro
+        roughness: 0.7,
+        metalness: 0.15
+      });
+      const cushion = new THREE.Mesh(cushionGeom, cushionMat);
+      cushion.position.y = seatHeight;
+      group.add(cushion);
+
+      // Casco/tapizado turquesa envolvente
+      const shellGeom = new THREE.SphereGeometry(
+        0.7,            // radio global del respaldo
+        48,             // segmentos horizontales
+        32,             // segmentos verticales
+        Math.PI * 0.15, // phiStart (recorta parte frontal)
+        Math.PI * 1.7,  // phiLength
+        Math.PI * 0.15, // thetaStart (recorta base)
+        Math.PI * 0.65  // thetaLength
+      );
+
+      const shellMat = new THREE.MeshStandardMaterial({
+        color: 0x206b7b, // turquesa oscuro
+        roughness: 0.55,
+        metalness: 0.25,
+        side: THREE.FrontSide
+      });
+
+      const shell = new THREE.Mesh(shellGeom, shellMat);
+      shell.scale.set(1.0, 1.15, 1.0);
+      shell.position.y = seatHeight + 0.22;
+      group.add(shell);
+
+      // Interior oscuro del respaldo
+      const innerMat = new THREE.MeshStandardMaterial({
+        color: 0x141b20,
+        roughness: 0.6,
+        metalness: 0.1,
+        side: THREE.BackSide
+      });
+      const inner = new THREE.Mesh(shellGeom.clone(), innerMat);
+      inner.scale.set(0.96, 1.12, 0.96);
+      inner.position.copy(shell.position);
+      group.add(inner);
+
+      // Patas de madera claras, algo inclinadas
+      const legHeight = seatHeight - 0.04;
+      const legRadius = 0.04;
+      const legGeom   = new THREE.CylinderGeometry(legRadius, legRadius, legHeight, 16);
+      const legMat    = new THREE.MeshStandardMaterial({
+        color: 0xd7aa6a,
+        roughness: 0.7,
+        metalness: 0.1
+      });
+
+      const legOffset = 0.28;
+      const legsData = [
+        { x:  legOffset, z:  legOffset },
+        { x: -legOffset, z:  legOffset },
+        { x:  legOffset, z: -legOffset },
+        { x: -legOffset, z: -legOffset }
+      ];
+
+      legsData.forEach(({ x, z }) => {
+        const leg = new THREE.Mesh(legGeom, legMat);
+        leg.position.set(x, legHeight / 2, z);
+
+        // Inclinación suave hacia afuera
+        const tiltX = (z > 0 ? -1 : 1) * 0.12; // delante/atrás
+        const tiltZ = (x > 0 ?  1 : -1) * 0.10; // izquierda/derecha
+        leg.rotation.x = tiltX;
+        leg.rotation.z = tiltZ;
+
+        group.add(leg);
+      });
+
+      return group;
+    }
+
+    const silla = crearSillaRealista();
+    silla.position.set(0, 0, 0);
+    silla.rotation.y = -Math.PI / 7; // ángulo similar a la foto
+    scene.add(silla);
+
+    // ================== RESPONSIVE =======================
+    window.addEventListener('resize', onWindowResize, false);
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // ================== ANIMACIÓN ========================
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
