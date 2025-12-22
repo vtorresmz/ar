@@ -115,11 +115,21 @@
         let velocity = new THREE.Vector3();
         let direction = new THREE.Vector3();
         let prevTime = performance.now();
+        
+        // Variables para VR y manos
+        let controller1, controller2;
+        let controllerGrip1, controllerGrip2;
+        let hand1, hand2;
+        let interactiveObjects = [];
+        let selectedObject = null;
+        let raycaster = new THREE.Raycaster();
+        let tempMatrix = new THREE.Matrix4();
+        let currentController = null;
 
         // Configuración de la habitación
-        const ROOM_SIZE = 3; // 3 metros
+        const ROOM_SIZE = 100; // 100 metros
         const ROOM_HEIGHT = 3; // 3 metros
-        const MOVE_SPEED = 2.0; // metros por segundo
+        const MOVE_SPEED = 10.0; // metros por segundo
 
         init();
         animate();
@@ -150,6 +160,9 @@
             // Configurar VR Button
             const vrButton = VRButton.createButton(renderer);
             document.getElementById('vrButton').replaceWith(vrButton);
+            
+            // Configurar controladores VR y manos
+            setupVRControllers();
 
             // Iluminación
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -384,7 +397,7 @@
                 new THREE.BoxGeometry(0.8, 0.6, 0.05),
                 new THREE.MeshStandardMaterial({ color: 0x8b6914 })
             );
-            frame.position.set(0, 1.8, -1.48);
+            frame.position.set(0, 1.8, -49.8);
             frame.castShadow = true;
             scene.add(frame);
 
@@ -393,7 +406,7 @@
                 new THREE.PlaneGeometry(0.7, 0.5),
                 new THREE.MeshStandardMaterial({ color: 0x4169e1 })
             );
-            painting.position.set(0, 1.8, -1.45);
+            painting.position.set(0, 1.8, -49.5);
             scene.add(painting);
 
             // Lámpara de techo
@@ -424,7 +437,7 @@
                 new THREE.BoxGeometry(1.0, 0.05, 0.2),
                 new THREE.MeshStandardMaterial({ color: 0x8b4513 })
             );
-            shelf.position.set(1.2, 1.5, -1.45);
+            shelf.position.set(15, 1.5, -48);
             shelf.castShadow = true;
             scene.add(shelf);
 
@@ -435,11 +448,203 @@
                     new THREE.BoxGeometry(0.05, 0.15, 0.12),
                     new THREE.MeshStandardMaterial({ color })
                 );
-                book.position.set(1.0 + i * 0.08, 1.58, -1.38);
+                book.position.set(14.5 + i * 0.08, 1.58, -47.9);
                 book.rotation.y = Math.random() * 0.2 - 0.1;
                 book.castShadow = true;
+                book.userData.interactive = true;
+                interactiveObjects.push(book);
                 scene.add(book);
             });
+            
+            // Distribuir más objetos interactivos en el espacio
+            addInteractiveObjects();
+        }
+        
+        function addInteractiveObjects() {
+            // Añadir cubos interactivos distribuidos en la habitación
+            const cubeColors = [0xff6b6b, 0x4ecdc4, 0xffe66d, 0xa8e6cf, 0xff8b94];
+            const positions = [
+                [10, 0.5, 10], [-10, 0.5, 10], [10, 0.5, -10], [-10, 0.5, -10],
+                [20, 0.5, 20], [-20, 0.5, 20], [20, 0.5, -20], [-20, 0.5, -20],
+                [30, 0.5, 0], [-30, 0.5, 0], [0, 0.5, 30], [0, 0.5, -30]
+            ];
+            
+            positions.forEach((pos, i) => {
+                const cube = new THREE.Mesh(
+                    new THREE.BoxGeometry(1, 1, 1),
+                    new THREE.MeshStandardMaterial({ 
+                        color: cubeColors[i % cubeColors.length],
+                        roughness: 0.5,
+                        metalness: 0.3
+                    })
+                );
+                cube.position.set(...pos);
+                cube.castShadow = true;
+                cube.receiveShadow = true;
+                cube.userData.interactive = true;
+                cube.userData.originalPosition = cube.position.clone();
+                interactiveObjects.push(cube);
+                scene.add(cube);
+            });
+            
+            // Añadir esferas interactivas
+            for (let i = 0; i < 8; i++) {
+                const sphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.5, 32, 32),
+                    new THREE.MeshStandardMaterial({
+                        color: Math.random() * 0xffffff,
+                        roughness: 0.3,
+                        metalness: 0.6
+                    })
+                );
+                const angle = (i / 8) * Math.PI * 2;
+                const radius = 25;
+                sphere.position.set(
+                    Math.cos(angle) * radius,
+                    1,
+                    Math.sin(angle) * radius
+                );
+                sphere.castShadow = true;
+                sphere.receiveShadow = true;
+                sphere.userData.interactive = true;
+                sphere.userData.originalPosition = sphere.position.clone();
+                interactiveObjects.push(sphere);
+                scene.add(sphere);
+            }
+        }
+        
+        function setupVRControllers() {
+            // Controlador 1 (mano derecha)
+            controller1 = renderer.xr.getController(0);
+            controller1.addEventListener('selectstart', onSelectStart);
+            controller1.addEventListener('selectend', onSelectEnd);
+            controller1.addEventListener('connected', function(event) {
+                this.add(buildController(event.data));
+            });
+            controller1.addEventListener('disconnected', function() {
+                this.remove(this.children[0]);
+            });
+            scene.add(controller1);
+            
+            // Controlador 2 (mano izquierda)
+            controller2 = renderer.xr.getController(1);
+            controller2.addEventListener('selectstart', onSelectStart);
+            controller2.addEventListener('selectend', onSelectEnd);
+            controller2.addEventListener('connected', function(event) {
+                this.add(buildController(event.data));
+            });
+            controller2.addEventListener('disconnected', function() {
+                this.remove(this.children[0]);
+            });
+            scene.add(controller2);
+            
+            // Grips para las manos (modelos de controladores)
+            const controllerModelFactory = new THREE.Object3D();
+            
+            controllerGrip1 = renderer.xr.getControllerGrip(0);
+            controllerGrip1.add(createHandModel('right'));
+            scene.add(controllerGrip1);
+            
+            controllerGrip2 = renderer.xr.getControllerGrip(1);
+            controllerGrip2.add(createHandModel('left'));
+            scene.add(controllerGrip2);
+        }
+        
+        function createHandModel(side) {
+            const handGroup = new THREE.Group();
+            
+            // Palma de la mano
+            const palm = new THREE.Mesh(
+                new THREE.BoxGeometry(0.08, 0.03, 0.12),
+                new THREE.MeshStandardMaterial({ 
+                    color: 0xffdbac,
+                    roughness: 0.8
+                })
+            );
+            handGroup.add(palm);
+            
+            // Dedos
+            const fingerPositions = [
+                { x: -0.03, z: 0.07, length: 0.08 },  // Índice
+                { x: -0.01, z: 0.07, length: 0.09 },  // Medio
+                { x: 0.01, z: 0.07, length: 0.08 },   // Anular
+                { x: 0.03, z: 0.07, length: 0.06 },   // Meñique
+                { x: -0.04, z: -0.02, length: 0.05 }  // Pulgar
+            ];
+            
+            fingerPositions.forEach((pos, i) => {
+                const finger = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.008, 0.008, pos.length, 8),
+                    new THREE.MeshStandardMaterial({ 
+                        color: 0xffdbac,
+                        roughness: 0.8
+                    })
+                );
+                finger.position.set(pos.x, 0, pos.z);
+                
+                if (i === 4) { // Pulgar
+                    finger.rotation.x = Math.PI / 4;
+                    finger.rotation.z = Math.PI / 6;
+                } else {
+                    finger.rotation.x = Math.PI / 2;
+                }
+                
+                handGroup.add(finger);
+            });
+            
+            return handGroup;
+        }
+        
+        function buildController(data) {
+            let geometry, material;
+            
+            // Crear línea de raycast para apuntar
+            geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, -1], 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute([0.5, 0.5, 0.5, 0, 0, 0], 3));
+            
+            material = new THREE.LineBasicMaterial({ 
+                vertexColors: true, 
+                blending: THREE.AdditiveBlending,
+                linewidth: 2
+            });
+            
+            return new THREE.Line(geometry, material);
+        }
+        
+        function onSelectStart(event) {
+            const controller = event.target;
+            currentController = controller;
+            
+            // Raycast para detectar objetos
+            tempMatrix.identity().extractRotation(controller.matrixWorld);
+            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+            
+            const intersections = raycaster.intersectObjects(interactiveObjects, false);
+            
+            if (intersections.length > 0) {
+                const intersection = intersections[0];
+                const object = intersection.object;
+                
+                // Agarrar objeto
+                selectedObject = object;
+                selectedObject.material.emissive.setHex(0x555555);
+                controller.attach(selectedObject);
+            }
+        }
+        
+        function onSelectEnd(event) {
+            const controller = event.target;
+            
+            if (selectedObject) {
+                // Soltar objeto
+                selectedObject.material.emissive.setHex(0x000000);
+                scene.attach(selectedObject);
+                selectedObject = null;
+            }
+            
+            currentController = null;
         }
 
         function onKeyDown(event) {
@@ -497,6 +702,37 @@
             camera.position.z = Math.max(-halfSize, Math.min(halfSize, camera.position.z));
             camera.position.y = Math.max(0.5, Math.min(ROOM_HEIGHT - 0.5, camera.position.y));
         }
+        
+        function highlightIntersections() {
+            // Resaltar objetos cuando el controlador apunta a ellos
+            if (!controller1 && !controller2) return;
+            
+            [controller1, controller2].forEach(controller => {
+                if (!controller) return;
+                
+                tempMatrix.identity().extractRotation(controller.matrixWorld);
+                raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+                raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+                
+                const intersections = raycaster.intersectObjects(interactiveObjects, false);
+                
+                if (intersections.length > 0) {
+                    const intersection = intersections[0];
+                    const object = intersection.object;
+                    
+                    if (object !== selectedObject) {
+                        object.material.emissive.setHex(0x333333);
+                    }
+                } else {
+                    // Remover resaltado de objetos no seleccionados
+                    interactiveObjects.forEach(obj => {
+                        if (obj !== selectedObject) {
+                            obj.material.emissive.setHex(0x000000);
+                        }
+                    });
+                }
+            });
+        }
 
         function animate() {
             renderer.setAnimationLoop(() => {
@@ -504,6 +740,11 @@
                 const delta = (time - prevTime) / 1000;
 
                 updateMovement(delta);
+                
+                // Actualizar resaltado de objetos en VR
+                if (renderer.xr.isPresenting) {
+                    highlightIntersections();
+                }
 
                 renderer.render(scene, camera);
 
