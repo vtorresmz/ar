@@ -199,6 +199,7 @@
         let lastShootTime = 0;
         let muzzleFlash = null;
         let zombieModel = null; // Modelo FBX base del zombie
+        let zombieAnimation = null; // Animación de caminar del zombie
         let fbxLoader = new FBXLoader();
         let mixers = []; // Mixers de animación para cada zombie
         const ZOMBIE_SPEED = 2.0;
@@ -606,70 +607,118 @@
         }
         
         function loadZombieModel() {
+            // Primero cargar la animación de caminar
             fbxLoader.load(
-                'assets/characters/Zombie Walk.fbx',
+                'assets/characters/Walking.fbx',
                 (fbx) => {
-                    console.log('Zombie model loaded successfully');
+                    console.log('Walking animation loaded successfully');
+                    zombieAnimation = fbx.animations[0]; // Guardar la animación
                     
-                    // Escalar el modelo al tamaño apropiado (tamaño humano ~1.8m)
-                    fbx.scale.set(0.0008, 0.0008, 0.0008); // Escala muy reducida
-                    
-                    // Centrar el modelo en el origen
-                    const box = new THREE.Box3().setFromObject(fbx);
-                    const center = box.getCenter(new THREE.Vector3());
-                    const size = box.getSize(new THREE.Vector3());
-                    
-                    // Ajustar para que los pies estén en el suelo (y=0)
-                    fbx.position.y = -box.min.y;
-                    
-                    console.log('Zombie size:', size, 'Height:', size.y);
-                    
-                    // Configurar sombras
-                    fbx.traverse((child) => {
-                        if (child.isMesh) {
-                            child.castShadow = true;
-                            child.receiveShadow = true;
+                    // Luego cargar el modelo del zombie
+                    fbxLoader.load(
+                        'assets/characters/Zombie Walk.fbx',
+                        (fbx) => {
+                            console.log('Zombie model loaded successfully');
                             
-                            // Asegurar que los materiales tengan emissive
-                            if (child.material) {
-                                if (Array.isArray(child.material)) {
-                                    child.material.forEach(mat => {
-                                        if (!mat.emissive) {
-                                            mat.emissive = new THREE.Color(0x000000);
-                                            mat.emissiveIntensity = 0;
+                            // Escalar el modelo al tamaño apropiado (tamaño humano ~1.8m)
+                            fbx.scale.set(0.0015, 0.0015, 0.0015);
+                            
+                            // Centrar el modelo en el origen
+                            const box = new THREE.Box3().setFromObject(fbx);
+                            const center = box.getCenter(new THREE.Vector3());
+                            const size = box.getSize(new THREE.Vector3());
+                            
+                            // Ajustar para que los pies estén en el suelo (y=0)
+                            fbx.position.y = -box.min.y;
+                            
+                            console.log('Zombie size:', size, 'Height:', size.y);
+                            
+                            // Configurar sombras
+                            fbx.traverse((child) => {
+                                if (child.isMesh) {
+                                    child.castShadow = true;
+                                    child.receiveShadow = true;
+                                    
+                                    // Asegurar que los materiales tengan emissive
+                                    if (child.material) {
+                                        if (Array.isArray(child.material)) {
+                                            child.material.forEach(mat => {
+                                                if (!mat.emissive) {
+                                                    mat.emissive = new THREE.Color(0x000000);
+                                                    mat.emissiveIntensity = 0;
+                                                }
+                                            });
+                                        } else {
+                                            if (!child.material.emissive) {
+                                                child.material.emissive = new THREE.Color(0x000000);
+                                                child.material.emissiveIntensity = 0;
+                                            }
                                         }
-                                    });
-                                } else {
-                                    if (!child.material.emissive) {
-                                        child.material.emissive = new THREE.Color(0x000000);
-                                        child.material.emissiveIntensity = 0;
                                     }
                                 }
+                            });
+                            
+                            zombieModel = fbx;
+                            
+                            // Iniciar spawneo de zombies
+                            setInterval(spawnZombie, ZOMBIE_SPAWN_INTERVAL);
+                            
+                            // Spawn inicial de zombies
+                            for (let i = 0; i < 5; i++) {
+                                setTimeout(() => spawnZombie(), i * 500);
+                            }
+                        },
+                        (xhr) => {
+                            console.log('Zombie: ' + (xhr.loaded / xhr.total * 100) + '% loaded');
+                        },
+                        (error) => {
+                            console.error('Error loading zombie model:', error);
+                            console.log('Using primitive zombies as fallback');
+                            setInterval(spawnZombie, ZOMBIE_SPAWN_INTERVAL);
+                            for (let i = 0; i < 5; i++) {
+                                setTimeout(() => spawnZombie(), i * 500);
                             }
                         }
-                    });
-                    
-                    zombieModel = fbx;
-                    
-                    // Iniciar spawneo de zombies
-                    setInterval(spawnZombie, ZOMBIE_SPAWN_INTERVAL);
-                    
-                    // Spawn inicial de zombies
-                    for (let i = 0; i < 5; i++) {
-                        setTimeout(() => spawnZombie(), i * 500);
-                    }
+                    );
                 },
                 (xhr) => {
-                    console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+                    console.log('Animation: ' + (xhr.loaded / xhr.total * 100) + '% loaded');
                 },
                 (error) => {
-                    console.error('Error loading zombie model:', error);
-                    // Si falla la carga, usar zombies primitivos
-                    console.log('Using primitive zombies as fallback');
-                    setInterval(spawnZombie, ZOMBIE_SPAWN_INTERVAL);
-                    for (let i = 0; i < 5; i++) {
-                        setTimeout(() => spawnZombie(), i * 500);
-                    }
+                    console.error('Error loading walking animation:', error);
+                    // Si falla la animación, intentar cargar el zombie sin ella
+                    fbxLoader.load(
+                        'assets/characters/Zombie Walk.fbx',
+                        (fbx) => {
+                            console.log('Zombie model loaded (without walking animation)');
+                            fbx.scale.set(0.0015, 0.0015, 0.0015);
+                            const box = new THREE.Box3().setFromObject(fbx);
+                            fbx.position.y = -box.min.y;
+                            
+                            fbx.traverse((child) => {
+                                if (child.isMesh) {
+                                    child.castShadow = true;
+                                    child.receiveShadow = true;
+                                }
+                            });
+                            
+                            zombieModel = fbx;
+                            
+                            setInterval(spawnZombie, ZOMBIE_SPAWN_INTERVAL);
+                            for (let i = 0; i < 5; i++) {
+                                setTimeout(() => spawnZombie(), i * 500);
+                            }
+                        },
+                        null,
+                        (error) => {
+                            console.error('Error loading zombie model:', error);
+                            console.log('Using primitive zombies as fallback');
+                            setInterval(spawnZombie, ZOMBIE_SPAWN_INTERVAL);
+                            for (let i = 0; i < 5; i++) {
+                                setTimeout(() => spawnZombie(), i * 500);
+                            }
+                        }
+                    );
                 }
             );
         }
@@ -702,12 +751,22 @@
             zombie.userData.isFBX = true;
             
             // Configurar animación
-            if (zombieModel.animations && zombieModel.animations.length > 0) {
+            if (zombieAnimation) {
+                // Usar la animación de Walking.fbx
+                const mixer = new THREE.AnimationMixer(zombie);
+                const action = mixer.clipAction(zombieAnimation);
+                action.play();
+                zombie.userData.mixer = mixer;
+                mixers.push(mixer);
+                console.log('Zombie spawned with Walking animation');
+            } else if (zombieModel.animations && zombieModel.animations.length > 0) {
+                // Fallback: usar la animación del modelo original
                 const mixer = new THREE.AnimationMixer(zombie);
                 const action = mixer.clipAction(zombieModel.animations[0]);
                 action.play();
                 zombie.userData.mixer = mixer;
                 mixers.push(mixer);
+                console.log('Zombie spawned with original animation');
             }
             
             scene.add(zombie);
