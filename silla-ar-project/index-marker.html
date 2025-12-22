@@ -164,7 +164,7 @@
     document.getElementById('marker-download').href = createMarkerImage();
 
     // ============= INICIALIZACIÓN =============
-    function init() {
+    async function init() {
       scene = new THREE.Scene();
 
       camera = new THREE.PerspectiveCamera(
@@ -181,7 +181,7 @@
       renderer.setPixelRatio(window.devicePixelRatio);
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
-      renderer.outputEncoding = THREE.sRGBEncoding;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
       document.body.appendChild(renderer.domElement);
 
       // Luces
@@ -202,12 +202,15 @@
       markerGroup.add(silla);
       markerGroup.visible = false; // El grupo se hace visible al detectar marcador
 
+      // Crear bitmap del marcador
+      const markerBitmap = await createMarkerImageBitmap();
+
       // Botón AR con image tracking
       const arButton = ARButton.createButton(renderer, { 
         requiredFeatures: ['image-tracking'],
         trackedImages: [
           {
-            image: createMarkerImageBitmap(),
+            image: markerBitmap,
             widthInMeters: 0.2 // 20cm de ancho
           }
         ],
@@ -398,7 +401,7 @@
       document.getElementById('info').textContent = 'Apunta la cámara al marcador';
       document.getElementById('controls').style.display = 'none';
       document.getElementById('marker-download').style.display = 'block';
-      silla.visible = false;
+      markerGroup.visible = false;
     }
 
     // ============= SELECCIONAR OBJETO =============
