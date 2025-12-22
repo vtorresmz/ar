@@ -164,6 +164,7 @@
         import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
         import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+        import { SkeletonUtils } from 'three/addons/utils/SkeletonUtils.js';
 
         // Variables principales
         let camera, scene, renderer, controls;
@@ -733,7 +734,8 @@
         }
         
         function createZombieFromFBX(position) {
-            const zombie = zombieModel.clone();
+            // Usar SkeletonUtils para clonar correctamente el modelo con esqueleto
+            const zombie = SkeletonUtils.clone(zombieModel);
             
             // Configurar posición
             zombie.position.copy(position);
