@@ -1,0 +1,1259 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zombie Shooter VR - Supervivencia</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        
+        #container {
+            width: 100%;
+            height: 100vh;
+        }
+        
+        #hud {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: #ff0000;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px 20px;
+            border-radius: 8px;
+            z-index: 100;
+            font-size: 18px;
+            font-weight: bold;
+            border: 2px solid #ff0000;
+            text-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+        }
+        
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            z-index: 99;
+        }
+        
+        #crosshair::before,
+        #crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(255, 0, 0, 0.8);
+        }
+        
+        #crosshair::before {
+            width: 2px;
+            height: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        
+        #crosshair::after {
+            width: 100%;
+            height: 2px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 100;
+            max-width: 300px;
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            color: white;
+            z-index: 100;
+        }
+        
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        #vrButton {
+            background: #2196F3;
+        }
+        
+        #vrButton:hover {
+            background: #0b7dda;
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    
+    <div id="info">
+        <h3>🧟 ZOMBIE SHOOTER 🔫</h3>
+        <p><strong>Controles PC:</strong></p>
+        <ul style="margin: 5px 0; padding-left: 20px;">
+            <li>W/A/S/D - Movimiento</li>
+            <li>Mouse - Apuntar</li>
+            <li>Click - Disparar</li>
+            <li>R - Recargar</li>
+            <li>Espacio - Subir</li>
+            <li>Shift - Bajar</li>
+        </ul>
+        <p><strong>VR:</strong> Gatillo para disparar</p>
+        <p id="vrInfo" class="hidden"><strong>Objetivo:</strong> ¡Sobrevive eliminando zombies!</p>
+    </div>
+    
+    <div id="hud">
+        <div>🎯 KILLS: <span id="killCount">0</span></div>
+        <div>💀 ZOMBIES: <span id="zombieCount">0</span></div>
+        <div>🔫 MUNICIÓN: <span id="ammoCount">30</span>/90</div>
+        <div>❤️ SALUD: <span id="healthCount">100</span>%</div>
+    </div>
+    
+    <div id="crosshair"></div>
+    
+    <div id="controls">
+        <button id="vrButton">Entrar en VR</button>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+
+        // Variables principales
+        let camera, scene, renderer, controls;
+        let moveForward = false, moveBackward = false;
+        let moveLeft = false, moveRight = false;
+        let moveUp = false, moveDown = false;
+        let velocity = new THREE.Vector3();
+        let direction = new THREE.Vector3();
+        let prevTime = performance.now();
+        
+        // Variables para VR y manos
+        let controller1, controller2;
+        let controllerGrip1, controllerGrip2;
+        let hand1, hand2;
+        let interactiveObjects = [];
+        let selectedObject = null;
+        let raycaster = new THREE.Raycaster();
+        let tempMatrix = new THREE.Matrix4();
+        let currentController = null;
+        
+        // Variables del juego
+        let zombies = [];
+        let bullets = [];
+        let gun, gunVR1, gunVR2;
+        let kills = 0;
+        let health = 100;
+        let ammo = 30;
+        let reserveAmmo = 90;
+        let isReloading = false;
+        let canShoot = true;
+        let shootCooldown = 0.15; // segundos entre disparos
+        let lastShootTime = 0;
+        let muzzleFlash = null;
+        const ZOMBIE_SPEED = 2.0;
+        const ZOMBIE_DAMAGE = 10;
+        const MAX_ZOMBIES = 20;
+        const ZOMBIE_SPAWN_INTERVAL = 3000; // 3 segundos
+
+        // Configuración de la habitación
+        const ROOM_SIZE = 100; // 100 metros
+        const ROOM_HEIGHT = 3; // 3 metros
+        const MOVE_SPEED = 10.0; // metros por segundo
+
+        init();
+        animate();
+
+        function init() {
+            // Crear escena
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Cielo azul claro
+
+            // Crear cámara
+            camera = new THREE.PerspectiveCamera(
+                75,
+                window.innerWidth / window.innerHeight,
+                0.1,
+                100
+            );
+            camera.position.set(0, 1.6, 0); // Altura de ojos humanos (1.6m)
+
+            // Crear renderer con soporte WebXR
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.xr.enabled = true;
+            document.getElementById('container').appendChild(renderer.domElement);
+
+            // Configurar VR Button
+            const vrButton = VRButton.createButton(renderer);
+            document.getElementById('vrButton').replaceWith(vrButton);
+            
+            // Configurar controladores VR y manos
+            setupVRControllers();
+
+            // Iluminación
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(2, 4, 2);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.camera.near = 0.1;
+            directionalLight.shadow.camera.far = 20;
+            directionalLight.shadow.camera.left = -5;
+            directionalLight.shadow.camera.right = 5;
+            directionalLight.shadow.camera.top = 5;
+            directionalLight.shadow.camera.bottom = -5;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+
+            // Luz puntual adicional
+            const pointLight = new THREE.PointLight(0xffa500, 0.5, 10);
+            pointLight.position.set(0, 2.5, 0);
+            scene.add(pointLight);
+
+            // Crear la habitación
+            createRoom();
+
+            // Añadir algunos objetos decorativos
+            addFurniture();
+
+            // Controles de primera persona (solo para modo no-VR)
+            controls = new PointerLockControls(camera, renderer.domElement);
+
+            // Event listeners para PointerLockControls
+            renderer.domElement.addEventListener('click', () => {
+                if (!renderer.xr.isPresenting) {
+                    controls.lock();
+                }
+            });
+
+            controls.addEventListener('lock', () => {
+                document.getElementById('info').style.opacity = '0.3';
+            });
+
+            controls.addEventListener('unlock', () => {
+                document.getElementById('info').style.opacity = '1';
+            });
+
+            // Controles de teclado
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            
+            // Disparo con click (escritorio)
+            document.addEventListener('mousedown', onMouseDown);
+            
+            // Crear pistola para escritorio
+            createGun();
+            
+            // Iniciar spawneo de zombies
+            setInterval(spawnZombie, ZOMBIE_SPAWN_INTERVAL);
+            
+            // Spawn inicial de zombies
+            for (let i = 0; i < 5; i++) {
+                setTimeout(() => spawnZombie(), i * 500);
+            }
+
+            // Redimensionar ventana
+            window.addEventListener('resize', onWindowResize);
+
+            // Detectar cuando entramos en VR
+            renderer.xr.addEventListener('sessionstart', () => {
+                document.getElementById('info').classList.add('hidden');
+                document.getElementById('vrInfo').classList.remove('hidden');
+            });
+
+            renderer.xr.addEventListener('sessionend', () => {
+                document.getElementById('info').classList.remove('hidden');
+            });
+        }
+
+        function createRoom() {
+            const halfSize = ROOM_SIZE / 2;
+
+            // Material para las paredes
+            const wallMaterial = new THREE.MeshStandardMaterial({
+                color: 0xf5f5dc, // Beige
+                side: THREE.BackSide,
+                roughness: 0.8,
+                metalness: 0.2
+            });
+
+            // Suelo
+            const floorGeometry = new THREE.PlaneGeometry(ROOM_SIZE, ROOM_SIZE);
+            const floorMaterial = new THREE.MeshStandardMaterial({
+                color: 0x8b7355, // Madera
+                roughness: 0.8,
+                metalness: 0.2
+            });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            // Techo
+            const ceiling = new THREE.Mesh(floorGeometry, wallMaterial);
+            ceiling.rotation.x = Math.PI / 2;
+            ceiling.position.y = ROOM_HEIGHT;
+            ceiling.receiveShadow = true;
+            scene.add(ceiling);
+
+            // Pared trasera (Norte)
+            const wallGeometry = new THREE.PlaneGeometry(ROOM_SIZE, ROOM_HEIGHT);
+            const backWall = new THREE.Mesh(wallGeometry, wallMaterial);
+            backWall.position.z = -halfSize;
+            backWall.position.y = ROOM_HEIGHT / 2;
+            backWall.receiveShadow = true;
+            scene.add(backWall);
+
+            // Pared frontal (Sur)
+            const frontWall = new THREE.Mesh(wallGeometry, wallMaterial);
+            frontWall.position.z = halfSize;
+            frontWall.position.y = ROOM_HEIGHT / 2;
+            frontWall.rotation.y = Math.PI;
+            frontWall.receiveShadow = true;
+            scene.add(frontWall);
+
+            // Pared izquierda (Oeste)
+            const leftWall = new THREE.Mesh(wallGeometry, wallMaterial);
+            leftWall.position.x = -halfSize;
+            leftWall.position.y = ROOM_HEIGHT / 2;
+            leftWall.rotation.y = Math.PI / 2;
+            leftWall.receiveShadow = true;
+            scene.add(leftWall);
+
+            // Pared derecha (Este)
+            const rightWall = new THREE.Mesh(wallGeometry, wallMaterial);
+            rightWall.position.x = halfSize;
+            rightWall.position.y = ROOM_HEIGHT / 2;
+            rightWall.rotation.y = -Math.PI / 2;
+            rightWall.receiveShadow = true;
+            scene.add(rightWall);
+
+            // Añadir líneas de esquina para mejor percepción de profundidad
+            addRoomEdges();
+        }
+
+        function addRoomEdges() {
+            const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 });
+            const halfSize = ROOM_SIZE / 2;
+
+            // Esquinas verticales
+            const corners = [
+                [halfSize, halfSize],
+                [halfSize, -halfSize],
+                [-halfSize, halfSize],
+                [-halfSize, -halfSize]
+            ];
+
+            corners.forEach(([x, z]) => {
+                const points = [
+                    new THREE.Vector3(x, 0, z),
+                    new THREE.Vector3(x, ROOM_HEIGHT, z)
+                ];
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const line = new THREE.Line(geometry, edgeMaterial);
+                scene.add(line);
+            });
+        }
+
+        function addFurniture() {
+            // Mesa en el centro
+            const tableGroup = new THREE.Group();
+            
+            // Superficie de la mesa
+            const tableTop = new THREE.Mesh(
+                new THREE.BoxGeometry(1.2, 0.05, 0.8),
+                new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.6 })
+            );
+            tableTop.position.y = 0.75;
+            tableTop.castShadow = true;
+            tableTop.receiveShadow = true;
+            tableGroup.add(tableTop);
+
+            // Patas de la mesa
+            const legGeometry = new THREE.CylinderGeometry(0.03, 0.03, 0.75);
+            const legMaterial = new THREE.MeshStandardMaterial({ color: 0x654321 });
+            
+            const legPositions = [
+                [0.5, 0.375, 0.35],
+                [0.5, 0.375, -0.35],
+                [-0.5, 0.375, 0.35],
+                [-0.5, 0.375, -0.35]
+            ];
+
+            legPositions.forEach(([x, y, z]) => {
+                const leg = new THREE.Mesh(legGeometry, legMaterial);
+                leg.position.set(x, y, z);
+                leg.castShadow = true;
+                tableGroup.add(leg);
+            });
+
+            scene.add(tableGroup);
+
+            // Silla
+            const chairGroup = new THREE.Group();
+            
+            // Asiento
+            const seat = new THREE.Mesh(
+                new THREE.BoxGeometry(0.45, 0.05, 0.45),
+                new THREE.MeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.7 })
+            );
+            seat.position.set(-0.8, 0.5, 0);
+            seat.castShadow = true;
+            chairGroup.add(seat);
+
+            // Respaldo
+            const backrest = new THREE.Mesh(
+                new THREE.BoxGeometry(0.45, 0.5, 0.05),
+                new THREE.MeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.7 })
+            );
+            backrest.position.set(-0.8, 0.75, -0.2);
+            backrest.castShadow = true;
+            chairGroup.add(backrest);
+
+            // Patas de la silla
+            const chairLegPositions = [
+                [-0.95, 0.25, -0.15],
+                [-0.95, 0.25, 0.15],
+                [-0.65, 0.25, -0.15],
+                [-0.65, 0.25, 0.15]
+            ];
+
+            chairLegPositions.forEach(([x, y, z]) => {
+                const leg = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.02, 0.02, 0.5),
+                    legMaterial
+                );
+                leg.position.set(x, y, z);
+                leg.castShadow = true;
+                chairGroup.add(leg);
+            });
+
+            scene.add(chairGroup);
+
+            // Cuadro en la pared
+            const frame = new THREE.Mesh(
+                new THREE.BoxGeometry(0.8, 0.6, 0.05),
+                new THREE.MeshStandardMaterial({ color: 0x8b6914 })
+            );
+            frame.position.set(0, 1.8, -49.8);
+            frame.castShadow = true;
+            scene.add(frame);
+
+            // "Pintura" dentro del marco
+            const painting = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.7, 0.5),
+                new THREE.MeshStandardMaterial({ color: 0x4169e1 })
+            );
+            painting.position.set(0, 1.8, -49.5);
+            scene.add(painting);
+
+            // Lámpara de techo
+            const lampGroup = new THREE.Group();
+            
+            const lampShade = new THREE.Mesh(
+                new THREE.ConeGeometry(0.2, 0.3, 8),
+                new THREE.MeshStandardMaterial({ 
+                    color: 0xfffacd, 
+                    emissive: 0xffff00,
+                    emissiveIntensity: 0.3
+                })
+            );
+            lampShade.position.y = 2.7;
+            lampGroup.add(lampShade);
+
+            const lampCord = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.01, 0.01, 0.3),
+                new THREE.MeshStandardMaterial({ color: 0x000000 })
+            );
+            lampCord.position.y = 2.85;
+            lampGroup.add(lampCord);
+
+            scene.add(lampGroup);
+
+            // Estante en la pared
+            const shelf = new THREE.Mesh(
+                new THREE.BoxGeometry(1.0, 0.05, 0.2),
+                new THREE.MeshStandardMaterial({ color: 0x8b4513 })
+            );
+            shelf.position.set(15, 1.5, -48);
+            shelf.castShadow = true;
+            scene.add(shelf);
+
+            // Libros en el estante
+            const bookColors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00];
+            bookColors.forEach((color, i) => {
+                const book = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.05, 0.15, 0.12),
+                    new THREE.MeshStandardMaterial({ color })
+                );
+                book.position.set(14.5 + i * 0.08, 1.58, -47.9);
+                book.rotation.y = Math.random() * 0.2 - 0.1;
+                book.castShadow = true;
+                book.userData.interactive = true;
+                interactiveObjects.push(book);
+                scene.add(book);
+            });
+            
+            // Distribuir más objetos interactivos en el espacio
+            addInteractiveObjects();
+        }
+        
+        function createGun() {
+            gun = new THREE.Group();
+            
+            // Cañón
+            const barrel = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.02, 0.02, 0.3, 8),
+                new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.9, roughness: 0.2 })
+            );
+            barrel.rotation.x = Math.PI / 2;
+            barrel.position.z = -0.15;
+            gun.add(barrel);
+            
+            // Cuerpo de la pistola
+            const body = new THREE.Mesh(
+                new THREE.BoxGeometry(0.05, 0.08, 0.15),
+                new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.8, roughness: 0.3 })
+            );
+            body.position.z = 0.05;
+            gun.add(body);
+            
+            // Empuñadura
+            const grip = new THREE.Mesh(
+                new THREE.BoxGeometry(0.04, 0.12, 0.06),
+                new THREE.MeshStandardMaterial({ color: 0x4a3520 })
+            );
+            grip.position.y = -0.1;
+            grip.position.z = 0.08;
+            gun.add(grip);
+            
+            // Punto de mira
+            const sight = new THREE.Mesh(
+                new THREE.BoxGeometry(0.01, 0.02, 0.01),
+                new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 0.5 })
+            );
+            sight.position.y = 0.05;
+            sight.position.z = -0.1;
+            gun.add(sight);
+            
+            // Posicionar pistola en la cámara
+            gun.position.set(0.3, -0.3, -0.5);
+            gun.rotation.y = -0.1;
+            camera.add(gun);
+            
+            // Destello del disparo
+            const flashGeometry = new THREE.SphereGeometry(0.05, 8, 8);
+            const flashMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xffff00,
+                transparent: true,
+                opacity: 0
+            });
+            muzzleFlash = new THREE.Mesh(flashGeometry, flashMaterial);
+            muzzleFlash.position.z = -0.3;
+            gun.add(muzzleFlash);
+        }
+        
+        function createZombie(position) {
+            const zombie = new THREE.Group();
+            
+            // Cuerpo
+            const body = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.3, 0.35, 1.2, 8),
+                new THREE.MeshStandardMaterial({ 
+                    color: 0x4a6741,
+                    roughness: 0.9,
+                    emissive: 0x2a4721,
+                    emissiveIntensity: 0.2
+                })
+            );
+            body.position.y = 0.6;
+            body.castShadow = true;
+            zombie.add(body);
+            
+            // Cabeza
+            const head = new THREE.Mesh(
+                new THREE.SphereGeometry(0.25, 8, 8),
+                new THREE.MeshStandardMaterial({ 
+                    color: 0x5a7751,
+                    roughness: 0.9,
+                    emissive: 0x3a5731,
+                    emissiveIntensity: 0.3
+                })
+            );
+            head.position.y = 1.4;
+            head.castShadow = true;
+            zombie.add(head);
+            
+            // Ojos rojos brillantes
+            const eyeGeometry = new THREE.SphereGeometry(0.05, 8, 8);
+            const eyeMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xff0000,
+                emissive: 0xff0000,
+                emissiveIntensity: 1
+            });
+            
+            const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+            leftEye.position.set(-0.1, 1.45, 0.2);
+            zombie.add(leftEye);
+            
+            const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+            rightEye.position.set(0.1, 1.45, 0.2);
+            zombie.add(rightEye);
+            
+            // Brazos
+            const armGeometry = new THREE.CylinderGeometry(0.1, 0.08, 0.8, 8);
+            const armMaterial = new THREE.MeshStandardMaterial({ color: 0x4a6741 });
+            
+            const leftArm = new THREE.Mesh(armGeometry, armMaterial);
+            leftArm.position.set(-0.4, 0.7, 0);
+            leftArm.rotation.z = 0.3;
+            leftArm.castShadow = true;
+            zombie.add(leftArm);
+            
+            const rightArm = new THREE.Mesh(armGeometry, armMaterial);
+            rightArm.position.set(0.4, 0.7, 0);
+            rightArm.rotation.z = -0.3;
+            rightArm.castShadow = true;
+            zombie.add(rightArm);
+            
+            // Piernas
+            const legGeometry = new THREE.CylinderGeometry(0.12, 0.1, 0.6, 8);
+            const legMaterial = new THREE.MeshStandardMaterial({ color: 0x3a5731 });
+            
+            const leftLeg = new THREE.Mesh(legGeometry, legMaterial);
+            leftLeg.position.set(-0.15, 0.3, 0);
+            leftLeg.castShadow = true;
+            zombie.add(leftLeg);
+            
+            const rightLeg = new THREE.Mesh(legGeometry, legMaterial);
+            rightLeg.position.set(0.15, 0.3, 0);
+            rightLeg.castShadow = true;
+            zombie.add(rightLeg);
+            
+            zombie.position.copy(position);
+            zombie.userData.health = 100;
+            zombie.userData.isZombie = true;
+            zombie.userData.speed = ZOMBIE_SPEED + Math.random() * 1.0;
+            zombie.userData.damage = ZOMBIE_DAMAGE;
+            zombie.userData.attackCooldown = 0;
+            
+            scene.add(zombie);
+            zombies.push(zombie);
+            updateHUD();
+            
+            return zombie;
+        }
+        
+        function spawnZombie() {
+            if (zombies.length >= MAX_ZOMBIES) return;
+            
+            // Spawn aleatorio en los bordes del mapa
+            const side = Math.floor(Math.random() * 4);
+            const halfSize = ROOM_SIZE / 2 - 5;
+            let x, z;
+            
+            switch(side) {
+                case 0: // Norte
+                    x = (Math.random() - 0.5) * ROOM_SIZE;
+                    z = -halfSize;
+                    break;
+                case 1: // Sur
+                    x = (Math.random() - 0.5) * ROOM_SIZE;
+                    z = halfSize;
+                    break;
+                case 2: // Este
+                    x = halfSize;
+                    z = (Math.random() - 0.5) * ROOM_SIZE;
+                    break;
+                case 3: // Oeste
+                    x = -halfSize;
+                    z = (Math.random() - 0.5) * ROOM_SIZE;
+                    break;
+            }
+            
+            createZombie(new THREE.Vector3(x, 0, z));
+        }
+        
+        function updateZombies(delta) {
+            zombies.forEach((zombie, index) => {
+                if (!zombie.userData.isZombie) return;
+                
+                // Mover zombie hacia el jugador
+                const direction = new THREE.Vector3();
+                direction.subVectors(camera.position, zombie.position);
+                direction.y = 0;
+                direction.normalize();
+                
+                // Rotar zombie hacia el jugador
+                zombie.lookAt(camera.position.x, zombie.position.y, camera.position.z);
+                
+                // Mover zombie
+                zombie.position.x += direction.x * zombie.userData.speed * delta;
+                zombie.position.z += direction.z * zombie.userData.speed * delta;
+                
+                // Animación de caminar (balanceo)
+                const time = performance.now() * 0.001;
+                zombie.rotation.z = Math.sin(time * 5) * 0.1;
+                
+                // Verificar distancia al jugador
+                const distance = zombie.position.distanceTo(camera.position);
+                
+                if (distance < 1.5) {
+                    // Atacar al jugador
+                    zombie.userData.attackCooldown -= delta;
+                    if (zombie.userData.attackCooldown <= 0) {
+                        health -= zombie.userData.damage;
+                        zombie.userData.attackCooldown = 1.0; // 1 segundo entre ataques
+                        updateHUD();
+                        
+                        // Efecto visual de daño
+                        document.body.style.border = '10px solid rgba(255, 0, 0, 0.5)';
+                        setTimeout(() => {
+                            document.body.style.border = 'none';
+                        }, 200);
+                        
+                        if (health <= 0) {
+                            gameOver();
+                        }
+                    }
+                }
+                
+                // Eliminar zombies muertos
+                if (zombie.userData.health <= 0) {
+                    scene.remove(zombie);
+                    zombies.splice(index, 1);
+                    kills++;
+                    updateHUD();
+                }
+            });
+        }
+        
+        function shoot(fromPosition, direction) {
+            if (!canShoot || isReloading || ammo <= 0) return;
+            
+            const currentTime = performance.now() / 1000;
+            if (currentTime - lastShootTime < shootCooldown) return;
+            
+            lastShootTime = currentTime;
+            ammo--;
+            updateHUD();
+            
+            // Efecto de destello
+            if (muzzleFlash) {
+                muzzleFlash.material.opacity = 1;
+                setTimeout(() => {
+                    if (muzzleFlash) muzzleFlash.material.opacity = 0;
+                }, 50);
+            }
+            
+            // Retroceso de la pistola
+            if (gun) {
+                gun.position.z += 0.05;
+                setTimeout(() => {
+                    if (gun) gun.position.z -= 0.05;
+                }, 100);
+            }
+            
+            // Crear bala visual
+            const bulletGeometry = new THREE.SphereGeometry(0.05, 8, 8);
+            const bulletMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xffff00,
+                emissive: 0xffff00,
+                emissiveIntensity: 1
+            });
+            const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+            bullet.position.copy(fromPosition);
+            bullet.userData.velocity = direction.clone().multiplyScalar(100);
+            bullet.userData.life = 2.0; // 2 segundos de vida
+            scene.add(bullet);
+            bullets.push(bullet);
+            
+            // Raycast para detectar impactos instantáneos
+            raycaster.set(fromPosition, direction);
+            const intersects = raycaster.intersectObjects(zombies, true);
+            
+            if (intersects.length > 0) {
+                const hitObject = intersects[0].object;
+                let zombie = hitObject;
+                
+                // Buscar el grupo zombie padre
+                while (zombie.parent && !zombie.userData.isZombie) {
+                    zombie = zombie.parent;
+                }
+                
+                if (zombie.userData.isZombie) {
+                    zombie.userData.health -= 50; // Daño por disparo
+                    
+                    // Efecto de impacto
+                    hitObject.material.emissive = new THREE.Color(0xff0000);
+                    hitObject.material.emissiveIntensity = 1;
+                    setTimeout(() => {
+                        hitObject.material.emissiveIntensity = 0.2;
+                    }, 100);
+                }
+            }
+            
+            // Reproducir sonido (simulado con vibración en VR)
+            if (navigator.vibrate) {
+                navigator.vibrate(50);
+            }
+        }
+        
+        function updateBullets(delta) {
+            bullets.forEach((bullet, index) => {
+                bullet.position.add(bullet.userData.velocity.clone().multiplyScalar(delta));
+                bullet.userData.life -= delta;
+                
+                // Eliminar balas que expiraron
+                if (bullet.userData.life <= 0) {
+                    scene.remove(bullet);
+                    bullets.splice(index, 1);
+                }
+            });
+        }
+        
+        function reload() {
+            if (isReloading || ammo === 30) return;
+            
+            isReloading = true;
+            
+            setTimeout(() => {
+                const ammoNeeded = 30 - ammo;
+                const ammoToReload = Math.min(ammoNeeded, reserveAmmo);
+                ammo += ammoToReload;
+                reserveAmmo -= ammoToReload;
+                isReloading = false;
+                updateHUD();
+            }, 2000); // 2 segundos de recarga
+        }
+        
+        function updateHUD() {
+            document.getElementById('killCount').textContent = kills;
+            document.getElementById('zombieCount').textContent = zombies.length;
+            document.getElementById('ammoCount').textContent = `${ammo}/${reserveAmmo}`;
+            document.getElementById('healthCount').textContent = health;
+            
+            // Cambiar color de salud
+            const healthElement = document.getElementById('healthCount');
+            if (health > 50) {
+                healthElement.style.color = '#00ff00';
+            } else if (health > 25) {
+                healthElement.style.color = '#ffff00';
+            } else {
+                healthElement.style.color = '#ff0000';
+            }
+        }
+        
+        function gameOver() {
+            const message = `\n\n🧟 GAME OVER 🧟\n\nKills: ${kills}\n\n¡Has sido derrotado!\n\nPresiona OK para recargar`;
+            alert(message);
+            location.reload();
+        }
+        
+        function onMouseDown(event) {
+            if (!controls.isLocked) return;
+            
+            // Disparar desde la cámara
+            const shootDirection = new THREE.Vector3(0, 0, -1);
+            shootDirection.applyQuaternion(camera.quaternion);
+            shoot(camera.position.clone(), shootDirection);
+        }
+        
+        function addInteractiveObjects() {
+            // Añadir cubos interactivos distribuidos en la habitación
+            const cubeColors = [0xff6b6b, 0x4ecdc4, 0xffe66d, 0xa8e6cf, 0xff8b94];
+            const positions = [
+                [10, 0.5, 10], [-10, 0.5, 10], [10, 0.5, -10], [-10, 0.5, -10],
+                [20, 0.5, 20], [-20, 0.5, 20], [20, 0.5, -20], [-20, 0.5, -20],
+                [30, 0.5, 0], [-30, 0.5, 0], [0, 0.5, 30], [0, 0.5, -30]
+            ];
+            
+            positions.forEach((pos, i) => {
+                const cube = new THREE.Mesh(
+                    new THREE.BoxGeometry(1, 1, 1),
+                    new THREE.MeshStandardMaterial({ 
+                        color: cubeColors[i % cubeColors.length],
+                        roughness: 0.5,
+                        metalness: 0.3
+                    })
+                );
+                cube.position.set(...pos);
+                cube.castShadow = true;
+                cube.receiveShadow = true;
+                cube.userData.interactive = true;
+                cube.userData.originalPosition = cube.position.clone();
+                interactiveObjects.push(cube);
+                scene.add(cube);
+            });
+            
+            // Añadir esferas interactivas
+            for (let i = 0; i < 8; i++) {
+                const sphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.5, 32, 32),
+                    new THREE.MeshStandardMaterial({
+                        color: Math.random() * 0xffffff,
+                        roughness: 0.3,
+                        metalness: 0.6
+                    })
+                );
+                const angle = (i / 8) * Math.PI * 2;
+                const radius = 25;
+                sphere.position.set(
+                    Math.cos(angle) * radius,
+                    1,
+                    Math.sin(angle) * radius
+                );
+                sphere.castShadow = true;
+                sphere.receiveShadow = true;
+                sphere.userData.interactive = true;
+                sphere.userData.originalPosition = sphere.position.clone();
+                interactiveObjects.push(sphere);
+                scene.add(sphere);
+            }
+        }
+        
+        function setupVRControllers() {
+            // Controlador 1 (mano derecha)
+            controller1 = renderer.xr.getController(0);
+            controller1.addEventListener('selectstart', onVRShoot);
+            controller1.addEventListener('selectend', onSelectEnd);
+            controller1.addEventListener('connected', function(event) {
+                this.add(buildController(event.data));
+            });
+            controller1.addEventListener('disconnected', function() {
+                this.remove(this.children[0]);
+            });
+            scene.add(controller1);
+            
+            // Controlador 2 (mano izquierda)
+            controller2 = renderer.xr.getController(1);
+            controller2.addEventListener('selectstart', onVRShoot);
+            controller2.addEventListener('selectend', onSelectEnd);
+            controller2.addEventListener('connected', function(event) {
+                this.add(buildController(event.data));
+            });
+            controller2.addEventListener('disconnected', function() {
+                this.remove(this.children[0]);
+            });
+            scene.add(controller2);
+            
+            // Grips para las manos (modelos de controladores)
+            const controllerModelFactory = new THREE.Object3D();
+            
+            controllerGrip1 = renderer.xr.getControllerGrip(0);
+            gunVR1 = createGunVR();
+            controllerGrip1.add(gunVR1);
+            scene.add(controllerGrip1);
+            
+            controllerGrip2 = renderer.xr.getControllerGrip(1);
+            gunVR2 = createGunVR();
+            controllerGrip2.add(gunVR2);
+            scene.add(controllerGrip2);
+        }
+        
+        function createGunVR() {
+            const gun = new THREE.Group();
+            
+            // Cañón
+            const barrel = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.015, 0.015, 0.25, 8),
+                new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.9, roughness: 0.2 })
+            );
+            barrel.rotation.x = Math.PI / 2;
+            barrel.position.z = -0.125;
+            gun.add(barrel);
+            
+            // Cuerpo
+            const body = new THREE.Mesh(
+                new THREE.BoxGeometry(0.04, 0.06, 0.12),
+                new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.8, roughness: 0.3 })
+            );
+            body.position.z = 0.04;
+            gun.add(body);
+            
+            // Empuñadura
+            const grip = new THREE.Mesh(
+                new THREE.BoxGeometry(0.03, 0.1, 0.05),
+                new THREE.MeshStandardMaterial({ color: 0x4a3520 })
+            );
+            grip.position.y = -0.08;
+            grip.position.z = 0.06;
+            gun.add(grip);
+            
+            gun.rotation.x = -Math.PI / 6;
+            
+            return gun;
+        }
+        
+        function createHandModel(side) {
+            const handGroup = new THREE.Group();
+            
+            // Palma de la mano
+            const palm = new THREE.Mesh(
+                new THREE.BoxGeometry(0.08, 0.03, 0.12),
+                new THREE.MeshStandardMaterial({ 
+                    color: 0xffdbac,
+                    roughness: 0.8
+                })
+            );
+            handGroup.add(palm);
+            
+            // Dedos
+            const fingerPositions = [
+                { x: -0.03, z: 0.07, length: 0.08 },  // Índice
+                { x: -0.01, z: 0.07, length: 0.09 },  // Medio
+                { x: 0.01, z: 0.07, length: 0.08 },   // Anular
+                { x: 0.03, z: 0.07, length: 0.06 },   // Meñique
+                { x: -0.04, z: -0.02, length: 0.05 }  // Pulgar
+            ];
+            
+            fingerPositions.forEach((pos, i) => {
+                const finger = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.008, 0.008, pos.length, 8),
+                    new THREE.MeshStandardMaterial({ 
+                        color: 0xffdbac,
+                        roughness: 0.8
+                    })
+                );
+                finger.position.set(pos.x, 0, pos.z);
+                
+                if (i === 4) { // Pulgar
+                    finger.rotation.x = Math.PI / 4;
+                    finger.rotation.z = Math.PI / 6;
+                } else {
+                    finger.rotation.x = Math.PI / 2;
+                }
+                
+                handGroup.add(finger);
+            });
+            
+            return handGroup;
+        }
+        
+        function buildController(data) {
+            let geometry, material;
+            
+            // Crear línea de raycast para apuntar
+            geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, -1], 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute([0.5, 0.5, 0.5, 0, 0, 0], 3));
+            
+            material = new THREE.LineBasicMaterial({ 
+                vertexColors: true, 
+                blending: THREE.AdditiveBlending,
+                linewidth: 2
+            });
+            
+            return new THREE.Line(geometry, material);
+        }
+        
+        function onVRShoot(event) {
+            const controller = event.target;
+            
+            // Disparar desde el controlador
+            tempMatrix.identity().extractRotation(controller.matrixWorld);
+            const shootDirection = new THREE.Vector3(0, 0, -1);
+            shootDirection.applyMatrix4(tempMatrix);
+            
+            const shootPosition = new THREE.Vector3();
+            shootPosition.setFromMatrixPosition(controller.matrixWorld);
+            
+            shoot(shootPosition, shootDirection);
+        }
+        
+        function onSelectStart(event) {
+            const controller = event.target;
+            currentController = controller;
+            
+            // Raycast para detectar objetos
+            tempMatrix.identity().extractRotation(controller.matrixWorld);
+            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+            
+            const intersections = raycaster.intersectObjects(interactiveObjects, false);
+            
+            if (intersections.length > 0) {
+                const intersection = intersections[0];
+                const object = intersection.object;
+                
+                // Agarrar objeto
+                selectedObject = object;
+                selectedObject.material.emissive.setHex(0x555555);
+                controller.attach(selectedObject);
+            }
+        }
+        
+        function onSelectEnd(event) {
+            const controller = event.target;
+            
+            if (selectedObject) {
+                // Soltar objeto
+                selectedObject.material.emissive.setHex(0x000000);
+                scene.attach(selectedObject);
+                selectedObject = null;
+            }
+            
+            currentController = null;
+        }
+
+        function onKeyDown(event) {
+            switch (event.code) {
+                case 'KeyW': moveForward = true; break;
+                case 'KeyA': moveLeft = true; break;
+                case 'KeyS': moveBackward = true; break;
+                case 'KeyD': moveRight = true; break;
+                case 'Space': moveUp = true; break;
+                case 'ShiftLeft': moveDown = true; break;
+                case 'KeyR': reload(); break;
+            }
+        }
+
+        function onKeyUp(event) {
+            switch (event.code) {
+                case 'KeyW': moveForward = false; break;
+                case 'KeyA': moveLeft = false; break;
+                case 'KeyS': moveBackward = false; break;
+                case 'KeyD': moveRight = false; break;
+                case 'Space': moveUp = false; break;
+                case 'ShiftLeft': moveDown = false; break;
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function updateMovement(delta) {
+            if (!controls.isLocked && !renderer.xr.isPresenting) return;
+
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+            velocity.y -= velocity.y * 10.0 * delta;
+
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.y = Number(moveUp) - Number(moveDown);
+            direction.normalize();
+
+            if (moveForward || moveBackward) velocity.z -= direction.z * MOVE_SPEED * delta;
+            if (moveLeft || moveRight) velocity.x -= direction.x * MOVE_SPEED * delta;
+            if (moveUp || moveDown) velocity.y += direction.y * MOVE_SPEED * delta;
+
+            controls.moveRight(-velocity.x * delta);
+            controls.moveForward(-velocity.z * delta);
+            
+            camera.position.y += velocity.y * delta;
+
+            // Límites de la habitación
+            const halfSize = ROOM_SIZE / 2 - 0.2;
+            camera.position.x = Math.max(-halfSize, Math.min(halfSize, camera.position.x));
+            camera.position.z = Math.max(-halfSize, Math.min(halfSize, camera.position.z));
+            camera.position.y = Math.max(0.5, Math.min(ROOM_HEIGHT - 0.5, camera.position.y));
+        }
+        
+        function highlightIntersections() {
+            // Resaltar objetos cuando el controlador apunta a ellos
+            if (!controller1 && !controller2) return;
+            
+            [controller1, controller2].forEach(controller => {
+                if (!controller) return;
+                
+                tempMatrix.identity().extractRotation(controller.matrixWorld);
+                raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+                raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+                
+                const intersections = raycaster.intersectObjects(interactiveObjects, false);
+                
+                if (intersections.length > 0) {
+                    const intersection = intersections[0];
+                    const object = intersection.object;
+                    
+                    if (object !== selectedObject) {
+                        object.material.emissive.setHex(0x333333);
+                    }
+                } else {
+                    // Remover resaltado de objetos no seleccionados
+                    interactiveObjects.forEach(obj => {
+                        if (obj !== selectedObject) {
+                            obj.material.emissive.setHex(0x000000);
+                        }
+                    });
+                }
+            });
+        }
+
+        function animate() {
+            renderer.setAnimationLoop(() => {
+                const time = performance.now();
+                const delta = (time - prevTime) / 1000;
+
+                updateMovement(delta);
+                updateZombies(delta);
+                updateBullets(delta);
+                
+                // Actualizar resaltado de objetos en VR
+                if (renderer.xr.isPresenting) {
+                    highlightIntersections();
+                }
+
+                renderer.render(scene, camera);
+
+                prevTime = time;
+            });
+        }
+    </script>
+</body>
+</html>
