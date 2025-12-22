@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recorrido Virtual - Habitación 3D</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        
+        #container {
+            width: 100%;
+            height: 100vh;
+        }
+        
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 100;
+            max-width: 300px;
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            color: white;
+            z-index: 100;
+        }
+        
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        #vrButton {
+            background: #2196F3;
+        }
+        
+        #vrButton:hover {
+            background: #0b7dda;
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    
+    <div id="info">
+        <h3>Recorrido Virtual 3D</h3>
+        <p><strong>Controles PC:</strong></p>
+        <ul style="margin: 5px 0; padding-left: 20px;">
+            <li>W/A/S/D - Movimiento</li>
+            <li>Mouse - Mirar alrededor</li>
+            <li>Espacio - Subir</li>
+            <li>Shift - Bajar</li>
+        </ul>
+        <p><strong>Móvil:</strong> Toca la pantalla para moverte</p>
+        <p id="vrInfo" class="hidden"><strong>VR:</strong> Usa los controles de Oculus</p>
+    </div>
+    
+    <div id="controls">
+        <button id="vrButton">Entrar en VR</button>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+
+        // Variables principales
+        let camera, scene, renderer, controls;
+        let moveForward = false, moveBackward = false;
+        let moveLeft = false, moveRight = false;
+        let moveUp = false, moveDown = false;
+        let velocity = new THREE.Vector3();
+        let direction = new THREE.Vector3();
+        let prevTime = performance.now();
+
+        // Configuración de la habitación
+        const ROOM_SIZE = 3; // 3 metros
+        const ROOM_HEIGHT = 3; // 3 metros
+        const MOVE_SPEED = 2.0; // metros por segundo
+
+        init();
+        animate();
+
+        function init() {
+            // Crear escena
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Cielo azul claro
+
+            // Crear cámara
+            camera = new THREE.PerspectiveCamera(
+                75,
+                window.innerWidth / window.innerHeight,
+                0.1,
+                100
+            );
+            camera.position.set(0, 1.6, 0); // Altura de ojos humanos (1.6m)
+
+            // Crear renderer con soporte WebXR
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.xr.enabled = true;
+            document.getElementById('container').appendChild(renderer.domElement);
+
+            // Configurar VR Button
+            const vrButton = VRButton.createButton(renderer);
+            document.getElementById('vrButton').replaceWith(vrButton);
+
+            // Iluminación
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(2, 4, 2);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.camera.near = 0.1;
+            directionalLight.shadow.camera.far = 20;
+            directionalLight.shadow.camera.left = -5;
+            directionalLight.shadow.camera.right = 5;
+            directionalLight.shadow.camera.top = 5;
+            directionalLight.shadow.camera.bottom = -5;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+
+            // Luz puntual adicional
+            const pointLight = new THREE.PointLight(0xffa500, 0.5, 10);
+            pointLight.position.set(0, 2.5, 0);
+            scene.add(pointLight);
+
+            // Crear la habitación
+            createRoom();
+
+            // Añadir algunos objetos decorativos
+            addFurniture();
+
+            // Controles de primera persona (solo para modo no-VR)
+            controls = new PointerLockControls(camera, renderer.domElement);
+
+            // Event listeners para PointerLockControls
+            renderer.domElement.addEventListener('click', () => {
+                if (!renderer.xr.isPresenting) {
+                    controls.lock();
+                }
+            });
+
+            controls.addEventListener('lock', () => {
+                document.getElementById('info').style.opacity = '0.3';
+            });
+
+            controls.addEventListener('unlock', () => {
+                document.getElementById('info').style.opacity = '1';
+            });
+
+            // Controles de teclado
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+
+            // Redimensionar ventana
+            window.addEventListener('resize', onWindowResize);
+
+            // Detectar cuando entramos en VR
+            renderer.xr.addEventListener('sessionstart', () => {
+                document.getElementById('info').classList.add('hidden');
+                document.getElementById('vrInfo').classList.remove('hidden');
+            });
+
+            renderer.xr.addEventListener('sessionend', () => {
+                document.getElementById('info').classList.remove('hidden');
+            });
+        }
+
+        function createRoom() {
+            const halfSize = ROOM_SIZE / 2;
+
+            // Material para las paredes
+            const wallMaterial = new THREE.MeshStandardMaterial({
+                color: 0xf5f5dc, // Beige
+                side: THREE.BackSide,
+                roughness: 0.8,
+                metalness: 0.2
+            });
+
+            // Suelo
+            const floorGeometry = new THREE.PlaneGeometry(ROOM_SIZE, ROOM_SIZE);
+            const floorMaterial = new THREE.MeshStandardMaterial({
+                color: 0x8b7355, // Madera
+                roughness: 0.8,
+                metalness: 0.2
+            });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            // Techo
+            const ceiling = new THREE.Mesh(floorGeometry, wallMaterial);
+            ceiling.rotation.x = Math.PI / 2;
+            ceiling.position.y = ROOM_HEIGHT;
+            ceiling.receiveShadow = true;
+            scene.add(ceiling);
+
+            // Pared trasera (Norte)
+            const wallGeometry = new THREE.PlaneGeometry(ROOM_SIZE, ROOM_HEIGHT);
+            const backWall = new THREE.Mesh(wallGeometry, wallMaterial);
+            backWall.position.z = -halfSize;
+            backWall.position.y = ROOM_HEIGHT / 2;
+            backWall.receiveShadow = true;
+            scene.add(backWall);
+
+            // Pared frontal (Sur)
+            const frontWall = new THREE.Mesh(wallGeometry, wallMaterial);
+            frontWall.position.z = halfSize;
+            frontWall.position.y = ROOM_HEIGHT / 2;
+            frontWall.rotation.y = Math.PI;
+            frontWall.receiveShadow = true;
+            scene.add(frontWall);
+
+            // Pared izquierda (Oeste)
+            const leftWall = new THREE.Mesh(wallGeometry, wallMaterial);
+            leftWall.position.x = -halfSize;
+            leftWall.position.y = ROOM_HEIGHT / 2;
+            leftWall.rotation.y = Math.PI / 2;
+            leftWall.receiveShadow = true;
+            scene.add(leftWall);
+
+            // Pared derecha (Este)
+            const rightWall = new THREE.Mesh(wallGeometry, wallMaterial);
+            rightWall.position.x = halfSize;
+            rightWall.position.y = ROOM_HEIGHT / 2;
+            rightWall.rotation.y = -Math.PI / 2;
+            rightWall.receiveShadow = true;
+            scene.add(rightWall);
+
+            // Añadir líneas de esquina para mejor percepción de profundidad
+            addRoomEdges();
+        }
+
+        function addRoomEdges() {
+            const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 });
+            const halfSize = ROOM_SIZE / 2;
+
+            // Esquinas verticales
+            const corners = [
+                [halfSize, halfSize],
+                [halfSize, -halfSize],
+                [-halfSize, halfSize],
+                [-halfSize, -halfSize]
+            ];
+
+            corners.forEach(([x, z]) => {
+                const points = [
+                    new THREE.Vector3(x, 0, z),
+                    new THREE.Vector3(x, ROOM_HEIGHT, z)
+                ];
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const line = new THREE.Line(geometry, edgeMaterial);
+                scene.add(line);
+            });
+        }
+
+        function addFurniture() {
+            // Mesa en el centro
+            const tableGroup = new THREE.Group();
+            
+            // Superficie de la mesa
+            const tableTop = new THREE.Mesh(
+                new THREE.BoxGeometry(1.2, 0.05, 0.8),
+                new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.6 })
+            );
+            tableTop.position.y = 0.75;
+            tableTop.castShadow = true;
+            tableTop.receiveShadow = true;
+            tableGroup.add(tableTop);
+
+            // Patas de la mesa
+            const legGeometry = new THREE.CylinderGeometry(0.03, 0.03, 0.75);
+            const legMaterial = new THREE.MeshStandardMaterial({ color: 0x654321 });
+            
+            const legPositions = [
+                [0.5, 0.375, 0.35],
+                [0.5, 0.375, -0.35],
+                [-0.5, 0.375, 0.35],
+                [-0.5, 0.375, -0.35]
+            ];
+
+            legPositions.forEach(([x, y, z]) => {
+                const leg = new THREE.Mesh(legGeometry, legMaterial);
+                leg.position.set(x, y, z);
+                leg.castShadow = true;
+                tableGroup.add(leg);
+            });
+
+            scene.add(tableGroup);
+
+            // Silla
+            const chairGroup = new THREE.Group();
+            
+            // Asiento
+            const seat = new THREE.Mesh(
+                new THREE.BoxGeometry(0.45, 0.05, 0.45),
+                new THREE.MeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.7 })
+            );
+            seat.position.set(-0.8, 0.5, 0);
+            seat.castShadow = true;
+            chairGroup.add(seat);
+
+            // Respaldo
+            const backrest = new THREE.Mesh(
+                new THREE.BoxGeometry(0.45, 0.5, 0.05),
+                new THREE.MeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.7 })
+            );
+            backrest.position.set(-0.8, 0.75, -0.2);
+            backrest.castShadow = true;
+            chairGroup.add(backrest);
+
+            // Patas de la silla
+            const chairLegPositions = [
+                [-0.95, 0.25, -0.15],
+                [-0.95, 0.25, 0.15],
+                [-0.65, 0.25, -0.15],
+                [-0.65, 0.25, 0.15]
+            ];
+
+            chairLegPositions.forEach(([x, y, z]) => {
+                const leg = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.02, 0.02, 0.5),
+                    legMaterial
+                );
+                leg.position.set(x, y, z);
+                leg.castShadow = true;
+                chairGroup.add(leg);
+            });
+
+            scene.add(chairGroup);
+
+            // Cuadro en la pared
+            const frame = new THREE.Mesh(
+                new THREE.BoxGeometry(0.8, 0.6, 0.05),
+                new THREE.MeshStandardMaterial({ color: 0x8b6914 })
+            );
+            frame.position.set(0, 1.8, -1.48);
+            frame.castShadow = true;
+            scene.add(frame);
+
+            // "Pintura" dentro del marco
+            const painting = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.7, 0.5),
+                new THREE.MeshStandardMaterial({ color: 0x4169e1 })
+            );
+            painting.position.set(0, 1.8, -1.45);
+            scene.add(painting);
+
+            // Lámpara de techo
+            const lampGroup = new THREE.Group();
+            
+            const lampShade = new THREE.Mesh(
+                new THREE.ConeGeometry(0.2, 0.3, 8),
+                new THREE.MeshStandardMaterial({ 
+                    color: 0xfffacd, 
+                    emissive: 0xffff00,
+                    emissiveIntensity: 0.3
+                })
+            );
+            lampShade.position.y = 2.7;
+            lampGroup.add(lampShade);
+
+            const lampCord = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.01, 0.01, 0.3),
+                new THREE.MeshStandardMaterial({ color: 0x000000 })
+            );
+            lampCord.position.y = 2.85;
+            lampGroup.add(lampCord);
+
+            scene.add(lampGroup);
+
+            // Estante en la pared
+            const shelf = new THREE.Mesh(
+                new THREE.BoxGeometry(1.0, 0.05, 0.2),
+                new THREE.MeshStandardMaterial({ color: 0x8b4513 })
+            );
+            shelf.position.set(1.2, 1.5, -1.45);
+            shelf.castShadow = true;
+            scene.add(shelf);
+
+            // Libros en el estante
+            const bookColors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00];
+            bookColors.forEach((color, i) => {
+                const book = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.05, 0.15, 0.12),
+                    new THREE.MeshStandardMaterial({ color })
+                );
+                book.position.set(1.0 + i * 0.08, 1.58, -1.38);
+                book.rotation.y = Math.random() * 0.2 - 0.1;
+                book.castShadow = true;
+                scene.add(book);
+            });
+        }
+
+        function onKeyDown(event) {
+            switch (event.code) {
+                case 'KeyW': moveForward = true; break;
+                case 'KeyA': moveLeft = true; break;
+                case 'KeyS': moveBackward = true; break;
+                case 'KeyD': moveRight = true; break;
+                case 'Space': moveUp = true; break;
+                case 'ShiftLeft': moveDown = true; break;
+            }
+        }
+
+        function onKeyUp(event) {
+            switch (event.code) {
+                case 'KeyW': moveForward = false; break;
+                case 'KeyA': moveLeft = false; break;
+                case 'KeyS': moveBackward = false; break;
+                case 'KeyD': moveRight = false; break;
+                case 'Space': moveUp = false; break;
+                case 'ShiftLeft': moveDown = false; break;
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function updateMovement(delta) {
+            if (!controls.isLocked && !renderer.xr.isPresenting) return;
+
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+            velocity.y -= velocity.y * 10.0 * delta;
+
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.y = Number(moveUp) - Number(moveDown);
+            direction.normalize();
+
+            if (moveForward || moveBackward) velocity.z -= direction.z * MOVE_SPEED * delta;
+            if (moveLeft || moveRight) velocity.x -= direction.x * MOVE_SPEED * delta;
+            if (moveUp || moveDown) velocity.y += direction.y * MOVE_SPEED * delta;
+
+            controls.moveRight(-velocity.x * delta);
+            controls.moveForward(-velocity.z * delta);
+            
+            camera.position.y += velocity.y * delta;
+
+            // Límites de la habitación
+            const halfSize = ROOM_SIZE / 2 - 0.2;
+            camera.position.x = Math.max(-halfSize, Math.min(halfSize, camera.position.x));
+            camera.position.z = Math.max(-halfSize, Math.min(halfSize, camera.position.z));
+            camera.position.y = Math.max(0.5, Math.min(ROOM_HEIGHT - 0.5, camera.position.y));
+        }
+
+        function animate() {
+            renderer.setAnimationLoop(() => {
+                const time = performance.now();
+                const delta = (time - prevTime) / 1000;
+
+                updateMovement(delta);
+
+                renderer.render(scene, camera);
+
+                prevTime = time;
+            });
+        }
+    </script>
+</body>
+</html>
