@@ -837,12 +837,16 @@
                 if (zombie.userData.isZombie) {
                     zombie.userData.health -= 50; // Daño por disparo
                     
-                    // Efecto de impacto
-                    hitObject.material.emissive = new THREE.Color(0xff0000);
-                    hitObject.material.emissiveIntensity = 1;
-                    setTimeout(() => {
-                        hitObject.material.emissiveIntensity = 0.2;
-                    }, 100);
+                    // Efecto de impacto (verificar si el material tiene emissive)
+                    if (hitObject.material.emissive !== undefined) {
+                        hitObject.material.emissive = new THREE.Color(0xff0000);
+                        hitObject.material.emissiveIntensity = 1;
+                        setTimeout(() => {
+                            if (hitObject.material && hitObject.material.emissive !== undefined) {
+                                hitObject.material.emissiveIntensity = 0.2;
+                            }
+                        }, 100);
+                    }
                 }
             }
             
