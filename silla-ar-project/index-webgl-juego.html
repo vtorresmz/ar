@@ -612,7 +612,17 @@
                     console.log('Zombie model loaded successfully');
                     
                     // Escalar el modelo al tamaño apropiado (tamaño humano ~1.8m)
-                    fbx.scale.set(0.002, 0.002, 0.002); // Escala reducida para tamaño apropiado
+                    fbx.scale.set(0.0008, 0.0008, 0.0008); // Escala muy reducida
+                    
+                    // Centrar el modelo en el origen
+                    const box = new THREE.Box3().setFromObject(fbx);
+                    const center = box.getCenter(new THREE.Vector3());
+                    const size = box.getSize(new THREE.Vector3());
+                    
+                    // Ajustar para que los pies estén en el suelo (y=0)
+                    fbx.position.y = -box.min.y;
+                    
+                    console.log('Zombie size:', size, 'Height:', size.y);
                     
                     // Configurar sombras
                     fbx.traverse((child) => {
@@ -678,6 +688,7 @@
             
             // Configurar posición
             zombie.position.copy(position);
+            zombie.position.y = 0; // Asegurar que esté en el suelo
             
             // Rotar para que mire hacia adelante
             zombie.rotation.y = 0;
