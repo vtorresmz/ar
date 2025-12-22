@@ -163,6 +163,7 @@
         import * as THREE from 'three';
         import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
         import { VRButton } from 'three/addons/webxr/VRButton.js';
+        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
         // Variables principales
         let camera, scene, renderer, controls;
@@ -197,6 +198,9 @@
         let shootCooldown = 0.15; // segundos entre disparos
         let lastShootTime = 0;
         let muzzleFlash = null;
+        let zombieModel = null; // Modelo FBX base del zombie
+        let fbxLoader = new FBXLoader();
+        let mixers = []; // Mixers de animación para cada zombie
         const ZOMBIE_SPEED = 2.0;
         const ZOMBIE_DAMAGE = 10;
         const MAX_ZOMBIES = 20;
@@ -297,13 +301,8 @@
             // Crear pistola para escritorio
             createGun();
             
-            // Iniciar spawneo de zombies
-            setInterval(spawnZombie, ZOMBIE_SPAWN_INTERVAL);
-            
-            // Spawn inicial de zombies
-            for (let i = 0; i < 5; i++) {
-                setTimeout(() => spawnZombie(), i * 500);
-            }
+            // Cargar modelo de zombie y luego iniciar el juego
+            loadZombieModel();
 
             // Redimensionar ventana
             window.addEventListener('resize', onWindowResize);
@@ -606,7 +605,108 @@
             gun.add(muzzleFlash);
         }
         
+        function loadZombieModel() {
+            fbxLoader.load(
+                'assets/characters/Zombie Walk.fbx',
+                (fbx) => {
+                    console.log('Zombie model loaded successfully');
+                    
+                    // Escalar el modelo al tamaño apropiado
+                    fbx.scale.set(0.01, 0.01, 0.01); // Ajustar según el tamaño del modelo
+                    
+                    // Configurar sombras
+                    fbx.traverse((child) => {
+                        if (child.isMesh) {
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                            
+                            // Asegurar que los materiales tengan emissive
+                            if (child.material) {
+                                if (Array.isArray(child.material)) {
+                                    child.material.forEach(mat => {
+                                        if (!mat.emissive) {
+                                            mat.emissive = new THREE.Color(0x000000);
+                                            mat.emissiveIntensity = 0;
+                                        }
+                                    });
+                                } else {
+                                    if (!child.material.emissive) {
+                                        child.material.emissive = new THREE.Color(0x000000);
+                                        child.material.emissiveIntensity = 0;
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    
+                    zombieModel = fbx;
+                    
+                    // Iniciar spawneo de zombies
+                    setInterval(spawnZombie, ZOMBIE_SPAWN_INTERVAL);
+                    
+                    // Spawn inicial de zombies
+                    for (let i = 0; i < 5; i++) {
+                        setTimeout(() => spawnZombie(), i * 500);
+                    }
+                },
+                (xhr) => {
+                    console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+                },
+                (error) => {
+                    console.error('Error loading zombie model:', error);
+                    // Si falla la carga, usar zombies primitivos
+                    console.log('Using primitive zombies as fallback');
+                    setInterval(spawnZombie, ZOMBIE_SPAWN_INTERVAL);
+                    for (let i = 0; i < 5; i++) {
+                        setTimeout(() => spawnZombie(), i * 500);
+                    }
+                }
+            );
+        }
+        
         function createZombie(position) {
+            // Si tenemos el modelo FBX, usarlo; si no, usar primitivos
+            if (zombieModel) {
+                return createZombieFromFBX(position);
+            } else {
+                return createPrimitiveZombie(position);
+            }
+        }
+        
+        function createZombieFromFBX(position) {
+            const zombie = zombieModel.clone();
+            
+            // Configurar posición
+            zombie.position.copy(position);
+            
+            // Rotar para que mire hacia adelante
+            zombie.rotation.y = 0;
+            
+            // Configurar datos del zombie
+            zombie.userData.health = 100;
+            zombie.userData.isZombie = true;
+            zombie.userData.speed = ZOMBIE_SPEED + Math.random() * 1.0;
+            zombie.userData.damage = ZOMBIE_DAMAGE;
+            zombie.userData.attackCooldown = 0;
+            zombie.userData.isFBX = true;
+            
+            // Configurar animación
+            if (zombieModel.animations && zombieModel.animations.length > 0) {
+                const mixer = new THREE.AnimationMixer(zombie);
+                const action = mixer.clipAction(zombieModel.animations[0]);
+                action.play();
+                zombie.userData.mixer = mixer;
+                mixers.push(mixer);
+            }
+            
+            scene.add(zombie);
+            zombies.push(zombie);
+            updateHUD();
+            
+            return zombie;
+        }
+        
+        function createPrimitiveZombie(position) {
             const zombie = new THREE.Group();
             
             // Cuerpo
@@ -731,6 +831,11 @@
             zombies.forEach((zombie, index) => {
                 if (!zombie.userData.isZombie) return;
                 
+                // Actualizar animación si existe mixer
+                if (zombie.userData.mixer) {
+                    zombie.userData.mixer.update(delta);
+                }
+                
                 // Mover zombie hacia el jugador
                 const direction = new THREE.Vector3();
                 direction.subVectors(camera.position, zombie.position);
@@ -738,15 +843,18 @@
                 direction.normalize();
                 
                 // Rotar zombie hacia el jugador
-                zombie.lookAt(camera.position.x, zombie.position.y, camera.position.z);
+                const targetRotation = Math.atan2(direction.x, direction.z);
+                zombie.rotation.y = targetRotation;
                 
                 // Mover zombie
                 zombie.position.x += direction.x * zombie.userData.speed * delta;
                 zombie.position.z += direction.z * zombie.userData.speed * delta;
                 
-                // Animación de caminar (balanceo)
-                const time = performance.now() * 0.001;
-                zombie.rotation.z = Math.sin(time * 5) * 0.1;
+                // Animación de balanceo solo para zombies primitivos
+                if (!zombie.userData.isFBX) {
+                    const time = performance.now() * 0.001;
+                    zombie.rotation.z = Math.sin(time * 5) * 0.1;
+                }
                 
                 // Verificar distancia al jugador
                 const distance = zombie.position.distanceTo(camera.position);
@@ -773,6 +881,13 @@
                 
                 // Eliminar zombies muertos
                 if (zombie.userData.health <= 0) {
+                    // Limpiar mixer
+                    if (zombie.userData.mixer) {
+                        const mixerIndex = mixers.indexOf(zombie.userData.mixer);
+                        if (mixerIndex > -1) {
+                            mixers.splice(mixerIndex, 1);
+                        }
+                    }
                     scene.remove(zombie);
                     zombies.splice(index, 1);
                     kills++;
