@@ -127,11 +127,11 @@
         <p><strong>Controles PC:</strong></p>
         <ul style="margin: 5px 0; padding-left: 20px;">
             <li>W/A/S/D - Movimiento</li>
+            <li><strong>Shift - CORRER 🏃</strong></li>
             <li>Mouse - Apuntar</li>
             <li>Click - Disparar</li>
             <li>R - Recargar</li>
-            <li>Espacio - Subir</li>
-            <li>Shift - Bajar</li>
+            <li>Espacio - Subir/Bajar</li>
         </ul>
         <p><strong>VR:</strong> Gatillo para disparar</p>
         <p id="vrInfo" class="hidden"><strong>Objetivo:</strong> ¡Sobrevive eliminando zombies!</p>
@@ -169,6 +169,7 @@
         let moveForward = false, moveBackward = false;
         let moveLeft = false, moveRight = false;
         let moveUp = false, moveDown = false;
+        let isRunning = false;
         let velocity = new THREE.Vector3();
         let direction = new THREE.Vector3();
         let prevTime = performance.now();
@@ -204,7 +205,8 @@
         // Configuración de la habitación
         const ROOM_SIZE = 100; // 100 metros
         const ROOM_HEIGHT = 3; // 3 metros
-        const MOVE_SPEED = 10.0; // metros por segundo
+        const MOVE_SPEED = 15.0; // metros por segundo (caminando)
+        const RUN_SPEED = 30.0; // metros por segundo (corriendo)
 
         init();
         animate();
@@ -1153,8 +1155,17 @@
                 case 'KeyA': moveLeft = true; break;
                 case 'KeyS': moveBackward = true; break;
                 case 'KeyD': moveRight = true; break;
-                case 'Space': moveUp = true; break;
-                case 'ShiftLeft': moveDown = true; break;
+                case 'Space': 
+                    if (event.shiftKey) {
+                        moveDown = true;
+                    } else {
+                        moveUp = true;
+                    }
+                    break;
+                case 'ShiftLeft': 
+                case 'ShiftRight':
+                    isRunning = true; 
+                    break;
                 case 'KeyR': reload(); break;
             }
         }
@@ -1165,8 +1176,14 @@
                 case 'KeyA': moveLeft = false; break;
                 case 'KeyS': moveBackward = false; break;
                 case 'KeyD': moveRight = false; break;
-                case 'Space': moveUp = false; break;
-                case 'ShiftLeft': moveDown = false; break;
+                case 'Space': 
+                    moveUp = false;
+                    moveDown = false;
+                    break;
+                case 'ShiftLeft':
+                case 'ShiftRight':
+                    isRunning = false;
+                    break;
             }
         }
 
@@ -1188,8 +1205,11 @@
             direction.y = Number(moveUp) - Number(moveDown);
             direction.normalize();
 
-            if (moveForward || moveBackward) velocity.z -= direction.z * MOVE_SPEED * delta;
-            if (moveLeft || moveRight) velocity.x -= direction.x * MOVE_SPEED * delta;
+            // Usar velocidad de correr si Shift está presionado
+            const currentSpeed = isRunning ? RUN_SPEED : MOVE_SPEED;
+
+            if (moveForward || moveBackward) velocity.z -= direction.z * currentSpeed * delta;
+            if (moveLeft || moveRight) velocity.x -= direction.x * currentSpeed * delta;
             if (moveUp || moveDown) velocity.y += direction.y * MOVE_SPEED * delta;
 
             controls.moveRight(-velocity.x * delta);
