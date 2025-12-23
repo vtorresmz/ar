@@ -164,7 +164,7 @@
         import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
         import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
-        import { SkeletonUtils } from 'three/addons/utils/SkeletonUtils.js';
+        import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
         // Variables principales
         let camera, scene, renderer, controls;
@@ -188,6 +188,7 @@
         
         // Variables del juego
         let zombies = [];
+        let zombieHitboxes = [];
         let bullets = [];
         let gun, gunVR1, gunVR2;
         let kills = 0;
@@ -203,7 +204,7 @@
         let zombieAnimation = null; // Animación de caminar del zombie
         let fbxLoader = new FBXLoader();
         let mixers = []; // Mixers de animación para cada zombie
-        const ZOMBIE_SPEED = 2.0;
+        const ZOMBIE_SPEED = 0.8;
         const ZOMBIE_DAMAGE = 10;
         const MAX_ZOMBIES = 20;
         const ZOMBIE_SPAWN_INTERVAL = 3000; // 3 segundos
@@ -617,12 +618,12 @@
                     
                     // Luego cargar el modelo del zombie
                     fbxLoader.load(
-                        'assets/characters/Zombie Walk.fbx',
+                        'assets/characters/zombie-walk.fbx',
                         (fbx) => {
                             console.log('Zombie model loaded successfully');
                             
                             // Escalar el modelo al tamaño apropiado (tamaño humano ~1.8m)
-                            fbx.scale.set(0.0015, 0.0015, 0.0015);
+                            fbx.scale.set(0.015, 0.015, 0.015);
                             
                             // Centrar el modelo en el origen
                             const box = new THREE.Box3().setFromObject(fbx);
@@ -689,10 +690,10 @@
                     console.error('Error loading walking animation:', error);
                     // Si falla la animación, intentar cargar el zombie sin ella
                     fbxLoader.load(
-                        'assets/characters/Zombie Walk.fbx',
+                        'assets/characters/zombie-walk.fbx',
                         (fbx) => {
                             console.log('Zombie model loaded (without walking animation)');
-                            fbx.scale.set(0.0015, 0.0015, 0.0015);
+                            fbx.scale.set(0.015, 0.015, 0.015);
                             const box = new THREE.Box3().setFromObject(fbx);
                             fbx.position.y = -box.min.y;
                             
@@ -751,6 +752,24 @@
             zombie.userData.damage = ZOMBIE_DAMAGE;
             zombie.userData.attackCooldown = 0;
             zombie.userData.isFBX = true;
+            
+            // Hitbox completo (pies→cabeza) como objeto independiente: evita que el escalado del FBX lo haga microscópico
+            const hitboxGeometry = new THREE.CylinderGeometry(0.5, 0.5, 2.0, 8);
+            const hitboxMaterial = new THREE.MeshBasicMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0,
+                depthWrite: false
+            });
+            // Debe ser visible=true para que el Raycaster lo detecte. Lo volvemos invisible sin escribir color.
+            hitboxMaterial.colorWrite = false;
+            const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
+            hitbox.userData.isZombieHitbox = true;
+            hitbox.userData.parentZombie = zombie;
+            zombie.userData.hitbox = hitbox;
+            zombieHitboxes.push(hitbox);
+            scene.add(hitbox);
+            hitbox.position.set(zombie.position.x, 1.0, zombie.position.z);
             
             // Configurar animación
             if (zombieAnimation) {
@@ -811,11 +830,7 @@
             
             // Ojos rojos brillantes
             const eyeGeometry = new THREE.SphereGeometry(0.05, 8, 8);
-            const eyeMaterial = new THREE.MeshBasicMaterial({ 
-                color: 0xff0000,
-                emissive: 0xff0000,
-                emissiveIntensity: 1
-            });
+            const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
             
             const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
             leftEye.position.set(-0.1, 1.45, 0.2);
@@ -861,6 +876,23 @@
             zombie.userData.speed = ZOMBIE_SPEED + Math.random() * 1.0;
             zombie.userData.damage = ZOMBIE_DAMAGE;
             zombie.userData.attackCooldown = 0;
+
+            // Hitbox completo (pies→cabeza) como objeto independiente
+            const hitboxGeometry = new THREE.CylinderGeometry(0.5, 0.5, 2.0, 8);
+            const hitboxMaterial = new THREE.MeshBasicMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0,
+                depthWrite: false
+            });
+            hitboxMaterial.colorWrite = false;
+            const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
+            hitbox.userData.isZombieHitbox = true;
+            hitbox.userData.parentZombie = zombie;
+            zombie.userData.hitbox = hitbox;
+            zombieHitboxes.push(hitbox);
+            scene.add(hitbox);
+            hitbox.position.set(zombie.position.x, 1.0, zombie.position.z);
             
             scene.add(zombie);
             zombies.push(zombie);
@@ -900,8 +932,10 @@
         }
         
         function updateZombies(delta) {
-            zombies.forEach((zombie, index) => {
-                if (!zombie.userData.isZombie) return;
+            // Iterar en reversa para evitar problemas al eliminar elementos
+            for (let i = zombies.length - 1; i >= 0; i--) {
+                const zombie = zombies[i];
+                if (!zombie.userData.isZombie) continue;
                 
                 // Actualizar animación si existe mixer
                 if (zombie.userData.mixer) {
@@ -921,6 +955,11 @@
                 // Mover zombie
                 zombie.position.x += direction.x * zombie.userData.speed * delta;
                 zombie.position.z += direction.z * zombie.userData.speed * delta;
+
+                // Mantener hitbox siguiendo al zombie
+                if (zombie.userData.hitbox) {
+                    zombie.userData.hitbox.position.set(zombie.position.x, 1.0, zombie.position.z);
+                }
                 
                 // Animación de balanceo solo para zombies primitivos
                 if (!zombie.userData.isFBX) {
@@ -953,6 +992,15 @@
                 
                 // Eliminar zombies muertos
                 if (zombie.userData.health <= 0) {
+                    console.log('💀 Zombie eliminado! Health:', zombie.userData.health);
+                    // Eliminar hitbox asociado
+                    if (zombie.userData.hitbox) {
+                        const hb = zombie.userData.hitbox;
+                        const hbIndex = zombieHitboxes.indexOf(hb);
+                        if (hbIndex > -1) zombieHitboxes.splice(hbIndex, 1);
+                        scene.remove(hb);
+                        zombie.userData.hitbox = null;
+                    }
                     // Limpiar mixer
                     if (zombie.userData.mixer) {
                         const mixerIndex = mixers.indexOf(zombie.userData.mixer);
@@ -961,11 +1009,11 @@
                         }
                     }
                     scene.remove(zombie);
-                    zombies.splice(index, 1);
+                    zombies.splice(i, 1);
                     kills++;
                     updateHUD();
                 }
-            });
+            }
         }
         
         function shoot(fromPosition, direction) {
@@ -996,11 +1044,7 @@
             
             // Crear bala visual
             const bulletGeometry = new THREE.SphereGeometry(0.05, 8, 8);
-            const bulletMaterial = new THREE.MeshBasicMaterial({ 
-                color: 0xffff00,
-                emissive: 0xffff00,
-                emissiveIntensity: 1
-            });
+            const bulletMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
             const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
             bullet.position.copy(fromPosition);
             bullet.userData.velocity = direction.clone().multiplyScalar(100);
@@ -1008,33 +1052,38 @@
             scene.add(bullet);
             bullets.push(bullet);
             
-            // Raycast para detectar impactos instantáneos
+            // Raycast para detectar impactos instantáneos (contra hitboxes)
             raycaster.set(fromPosition, direction);
-            const intersects = raycaster.intersectObjects(zombies, true);
+            const intersects = raycaster.intersectObjects(zombieHitboxes, false);
+            
+            console.log('🔫 Disparo! Intersecciones:', intersects.length);
+            if (intersects.length > 0) {
+                console.log('🎯 Primera intersección:', intersects[0].object.type, 'Distance:', intersects[0].distance);
+            }
             
             if (intersects.length > 0) {
                 const hitObject = intersects[0].object;
                 let zombie = hitObject;
                 
-                // Buscar el grupo zombie padre
-                while (zombie.parent && !zombie.userData.isZombie) {
-                    zombie = zombie.parent;
+                console.log('🎯 Objeto impactado:', hitObject.type, hitObject.userData);
+                
+                // Siempre impactamos hitboxes, así que el zombie viene directo
+                if (hitObject.userData && hitObject.userData.isZombieHitbox) {
+                    zombie = hitObject.userData.parentZombie;
+                    console.log('✅ Hitbox detectado! Zombie objetivo encontrado');
                 }
                 
-                if (zombie.userData.isZombie) {
+                if (zombie.userData && zombie.userData.isZombie) {
+                    const oldHealth = zombie.userData.health;
                     zombie.userData.health -= 50; // Daño por disparo
+                    console.log('💥 Zombie herido! Vida:', oldHealth, '→', zombie.userData.health);
                     
-                    // Efecto de impacto (verificar si el material tiene emissive)
-                    if (hitObject.material.emissive !== undefined) {
-                        hitObject.material.emissive = new THREE.Color(0xff0000);
-                        hitObject.material.emissiveIntensity = 1;
-                        setTimeout(() => {
-                            if (hitObject.material && hitObject.material.emissive !== undefined) {
-                                hitObject.material.emissiveIntensity = 0.2;
-                            }
-                        }, 100);
-                    }
+                    // (Sin efecto de material aquí: el hitbox no se renderiza)
+                } else {
+                    console.log('⚠️ No se encontró userData.isZombie en el objeto o sus padres');
                 }
+            } else {
+                console.log('❌ No se detectaron impactos');
             }
             
             // Reproducir sonido (simulado con vibración en VR)
