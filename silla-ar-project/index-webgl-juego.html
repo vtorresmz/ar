@@ -186,6 +186,11 @@
         let tempMatrix = new THREE.Matrix4();
         let currentController = null;
         
+        // Variables para movimiento VR con joystick
+        let cameraRig; // Grupo que contiene la cámara para mover en VR
+        let vrMovementSpeed = 5.0; // Velocidad de movimiento en VR
+        let vrRotationSpeed = 1.5; // Velocidad de rotación con joystick derecho
+        
         // Variables del juego
         let zombies = [];
         let zombieHitboxes = [];
@@ -230,7 +235,13 @@
                 0.1,
                 100
             );
-            camera.position.set(0, 1.6, 0); // Altura de ojos humanos (1.6m)
+            
+            // Crear camera rig para movimiento VR
+            cameraRig = new THREE.Group();
+            cameraRig.add(camera);
+            scene.add(cameraRig);
+            cameraRig.position.set(0, 0, 0); // El rig está en el suelo
+            camera.position.set(0, 1.6, 0); // Altura de ojos relativa al rig
 
             // Crear renderer con soporte WebXR
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -932,6 +943,10 @@
         }
         
         function updateZombies(delta) {
+            // Obtener posición real del jugador (considerando VR)
+            const playerPosition = new THREE.Vector3();
+            camera.getWorldPosition(playerPosition);
+            
             // Iterar en reversa para evitar problemas al eliminar elementos
             for (let i = zombies.length - 1; i >= 0; i--) {
                 const zombie = zombies[i];
@@ -944,7 +959,7 @@
                 
                 // Mover zombie hacia el jugador
                 const direction = new THREE.Vector3();
-                direction.subVectors(camera.position, zombie.position);
+                direction.subVectors(playerPosition, zombie.position);
                 direction.y = 0;
                 direction.normalize();
                 
@@ -968,7 +983,7 @@
                 }
                 
                 // Verificar distancia al jugador
-                const distance = zombie.position.distanceTo(camera.position);
+                const distance = zombie.position.distanceTo(playerPosition);
                 
                 if (distance < 1.5) {
                     // Atacar al jugador
@@ -1216,7 +1231,7 @@
             controller1.addEventListener('disconnected', function() {
                 this.remove(this.children[0]);
             });
-            scene.add(controller1);
+            cameraRig.add(controller1);
             
             // Controlador 2 (mano izquierda)
             controller2 = renderer.xr.getController(1);
@@ -1228,7 +1243,7 @@
             controller2.addEventListener('disconnected', function() {
                 this.remove(this.children[0]);
             });
-            scene.add(controller2);
+            cameraRig.add(controller2);
             
             // Grips para las manos (modelos de controladores)
             const controllerModelFactory = new THREE.Object3D();
@@ -1236,12 +1251,12 @@
             controllerGrip1 = renderer.xr.getControllerGrip(0);
             gunVR1 = createGunVR();
             controllerGrip1.add(gunVR1);
-            scene.add(controllerGrip1);
+            cameraRig.add(controllerGrip1);
             
             controllerGrip2 = renderer.xr.getControllerGrip(1);
             gunVR2 = createGunVR();
             controllerGrip2.add(gunVR2);
-            scene.add(controllerGrip2);
+            cameraRig.add(controllerGrip2);
         }
         
         function createGunVR() {
@@ -1464,6 +1479,96 @@
             camera.position.y = Math.max(0.5, Math.min(ROOM_HEIGHT - 0.5, camera.position.y));
         }
         
+        function updateVRMovement(delta) {
+            // Solo procesar si estamos en modo VR
+            if (!renderer.xr.isPresenting) return;
+            
+            const session = renderer.xr.getSession();
+            if (!session) return;
+            
+            // Obtener los input sources (controladores)
+            const inputSources = session.inputSources;
+            if (!inputSources) return;
+            
+            let moveX = 0;
+            let moveZ = 0;
+            let rotateY = 0;
+            
+            for (const source of inputSources) {
+                if (!source.gamepad) continue;
+                
+                const gamepad = source.gamepad;
+                const axes = gamepad.axes;
+                
+                // Meta Quest 2/3 típicamente tienen 4 ejes:
+                // axes[0] = touchpad/thumbstick X (obsoleto en Quest)
+                // axes[1] = touchpad/thumbstick Y (obsoleto en Quest)
+                // axes[2] = thumbstick X
+                // axes[3] = thumbstick Y
+                
+                // Detectar qué mano es basándose en handedness
+                if (source.handedness === 'left') {
+                    // Joystick izquierdo: movimiento
+                    // Para Quest, los thumbsticks están en axes[2] y axes[3]
+                    if (axes.length >= 4) {
+                        moveX = axes[2];
+                        moveZ = axes[3];
+                    }
+                    // Fallback para otros dispositivos
+                    if ((moveX === 0 && moveZ === 0) && axes.length >= 2) {
+                        moveX = axes[0];
+                        moveZ = axes[1];
+                    }
+                } else if (source.handedness === 'right') {
+                    // Joystick derecho: rotación
+                    if (axes.length >= 4) {
+                        rotateY = axes[2];
+                    }
+                    // Fallback
+                    if (rotateY === 0 && axes.length >= 2) {
+                        rotateY = axes[0];
+                    }
+                }
+            }
+            
+            // Aplicar zona muerta para evitar drift
+            const deadzone = 0.15;
+            if (Math.abs(moveX) < deadzone) moveX = 0;
+            if (Math.abs(moveZ) < deadzone) moveZ = 0;
+            if (Math.abs(rotateY) < deadzone) rotateY = 0;
+            
+            // Aplicar rotación (snap turn o continua)
+            if (rotateY !== 0) {
+                cameraRig.rotation.y -= rotateY * vrRotationSpeed * delta;
+            }
+            
+            // Calcular dirección de movimiento basada en la orientación de la cámara
+            if (moveX !== 0 || moveZ !== 0) {
+                // Obtener la dirección hacia donde mira la cámara en el plano XZ
+                const cameraWorldDirection = new THREE.Vector3();
+                camera.getWorldDirection(cameraWorldDirection);
+                cameraWorldDirection.y = 0;
+                cameraWorldDirection.normalize();
+                
+                // Vector derecho de la cámara
+                const cameraRight = new THREE.Vector3();
+                cameraRight.crossVectors(new THREE.Vector3(0, 1, 0), cameraWorldDirection).normalize();
+                
+                // Calcular el movimiento
+                const movement = new THREE.Vector3();
+                movement.addScaledVector(cameraRight, -moveX * vrMovementSpeed * delta);
+                movement.addScaledVector(cameraWorldDirection, -moveZ * vrMovementSpeed * delta);
+                
+                // Aplicar movimiento al rig
+                cameraRig.position.add(movement);
+                
+                // Límites de la habitación
+                const halfSize = ROOM_SIZE / 2 - 0.5;
+                cameraRig.position.x = Math.max(-halfSize, Math.min(halfSize, cameraRig.position.x));
+                cameraRig.position.z = Math.max(-halfSize, Math.min(halfSize, cameraRig.position.z));
+            }
+        }
+        
         function highlightIntersections() {
             // Resaltar objetos cuando el controlador apunta a ellos
             if (!controller1 && !controller2) return;
@@ -1501,6 +1606,7 @@
                 const delta = (time - prevTime) / 1000;
 
                 updateMovement(delta);
+                updateVRMovement(delta); // Movimiento con joysticks en VR
                 updateZombies(delta);
                 updateBullets(delta);
                 
