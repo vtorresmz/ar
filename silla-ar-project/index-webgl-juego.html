@@ -133,8 +133,14 @@
             <li>1-9 - Seleccionar opción</li>
             <li>X/Esc - Cerrar diálogo</li>
         </ul>
-        <p><strong>VR:</strong> Joystick moverse, Gatillo interactuar</p>
-        <p id="vrInfo" class="hidden"><strong>Acércate a Francisca para conversar</strong></p>
+        <p><strong>Controles VR (Meta Quest):</strong></p>
+        <ul style="margin: 5px 0; padding-left: 20px;">
+            <li>🎮 Joystick izq. - Movimiento</li>
+            <li>🎮 Joystick der. - Girar</li>
+            <li>🔫 Gatillo - Apuntar a Francisca para hablar</li>
+            <li>👆 Apunta a los botones y presiona gatillo</li>
+        </ul>
+        <p id="vrInfo" class="hidden"><strong>🎯 Apunta a Francisca y presiona gatillo para hablar</strong></p>
     </div>
     
     <!-- HUD oculto - Demo sin zombies -->
@@ -357,11 +363,14 @@
             createDialogueUI(scene) {
                 this.dialogueGroup = new THREE.Group();
                 this.dialogueGroup.position.copy(this.position);
-                this.dialogueGroup.position.y = 2.2; // Encima de la cabeza
+                // Posicionar al costado derecho de Francisca (no detrás)
+                this.dialogueGroup.position.x += 1.8; // Mover a la derecha
+                this.dialogueGroup.position.y = 1.5; // A la altura de los ojos
+                this.dialogueGroup.position.z += 0.5; // Ligeramente hacia adelante
                 this.dialogueGroup.visible = false;
                 
-                // Panel de fondo
-                const panelGeometry = new THREE.PlaneGeometry(2.5, 1.8);
+                // Panel de fondo más grande para VR
+                const panelGeometry = new THREE.PlaneGeometry(2.8, 2.4);
                 const panelMaterial = new THREE.MeshBasicMaterial({
                     color: 0x1a1a2e,
                     transparent: true,
@@ -371,6 +380,9 @@
                 this.dialoguePanel = new THREE.Mesh(panelGeometry, panelMaterial);
                 this.dialogueGroup.add(this.dialoguePanel);
                 
+                // Array para almacenar botones VR interactivos
+                this.vrButtons = [];
+                
                 // Borde del panel
                 const borderGeometry = new THREE.EdgesGeometry(panelGeometry);
                 const borderMaterial = new THREE.LineBasicMaterial({ color: 0x4fc3f7 });
@@ -379,14 +391,14 @@
                 
                 // Crear canvas para el texto
                 this.textCanvas = document.createElement('canvas');
-                this.textCanvas.width = 512;
-                this.textCanvas.height = 400;
+                this.textCanvas.width = 600;
+                this.textCanvas.height = 500;
                 this.textContext = this.textCanvas.getContext('2d');
                 
                 this.textTexture = new THREE.CanvasTexture(this.textCanvas);
                 this.textTexture.needsUpdate = true;
                 
-                const textGeometry = new THREE.PlaneGeometry(2.4, 1.7);
+                const textGeometry = new THREE.PlaneGeometry(2.7, 2.3);
                 const textMaterial = new THREE.MeshBasicMaterial({
                     map: this.textTexture,
                     transparent: true,
@@ -396,68 +408,158 @@
                 this.textMesh.position.z = 0.01;
                 this.dialogueGroup.add(this.textMesh);
                 
+                // Crear contenedor para botones VR
+                this.buttonsContainer = new THREE.Group();
+                this.buttonsContainer.position.z = 0.02;
+                this.dialogueGroup.add(this.buttonsContainer);
+                
+                // Botón de cerrar (X)
+                this.closeButton = this.createVRButton('✕', 0xff5555, 1.15, 1.0, 0.15);
+                this.closeButton.userData.action = 'close';
+                this.closeButton.userData.npcInstance = this;
+                this.dialogueGroup.add(this.closeButton);
+                
                 scene.add(this.dialogueGroup);
+            }
+            
+            // Crear un botón 3D para VR
+            createVRButton(text, color, x, y, size = 0.25, optionIndex = -1) {
+                const buttonGroup = new THREE.Group();
+                
+                // Fondo del botón
+                const buttonGeometry = new THREE.PlaneGeometry(size * 4, size * 1.2);
+                const buttonMaterial = new THREE.MeshBasicMaterial({
+                    color: color,
+                    transparent: true,
+                    opacity: 0.9,
+                    side: THREE.DoubleSide
+                });
+                const button = new THREE.Mesh(buttonGeometry, buttonMaterial);
+                buttonGroup.add(button);
+                
+                // Borde del botón
+                const borderGeometry = new THREE.EdgesGeometry(buttonGeometry);
+                const borderMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+                const border = new THREE.LineSegments(borderGeometry, borderMaterial);
+                buttonGroup.add(border);
+                
+                // Texto del botón usando canvas
+                const canvas = document.createElement('canvas');
+                canvas.width = 256;
+                canvas.height = 64;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 28px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(text.substring(0, 30), 128, 32);
+                
+                const textTexture = new THREE.CanvasTexture(canvas);
+                const textGeometry = new THREE.PlaneGeometry(size * 3.8, size * 1.0);
+                const textMaterial = new THREE.MeshBasicMaterial({
+                    map: textTexture,
+                    transparent: true,
+                    side: THREE.DoubleSide
+                });
+                const textMesh = new THREE.Mesh(textGeometry, textMaterial);
+                textMesh.position.z = 0.01;
+                buttonGroup.add(textMesh);
+                
+                buttonGroup.position.set(x, y, 0.02);
+                buttonGroup.userData.isVRButton = true;
+                buttonGroup.userData.optionIndex = optionIndex;
+                buttonGroup.userData.baseColor = color;
+                buttonGroup.userData.buttonMesh = button;
+                
+                return buttonGroup;
+            }
+            
+            // Limpiar botones anteriores
+            clearVRButtons() {
+                this.vrButtons.forEach(btn => {
+                    this.buttonsContainer.remove(btn);
+                });
+                this.vrButtons = [];
+            }
+            
+            // Crear botones de opciones para VR
+            createOptionButtons(options) {
+                this.clearVRButtons();
+                
+                const startY = 0.3; // Posición inicial Y
+                const spacing = 0.35; // Espacio entre botones
+                
+                options.forEach((option, index) => {
+                    const shortText = option.length > 35 ? option.substring(0, 32) + '...' : option;
+                    const button = this.createVRButton(
+                        `${index + 1}. ${shortText}`,
+                        0x3a6ea5,
+                        0, // centrado
+                        startY - (index * spacing),
+                        0.3,
+                        index
+                    );
+                    button.userData.npcInstance = this;
+                    this.buttonsContainer.add(button);
+                    this.vrButtons.push(button);
+                });
             }
             
             updateDialogueText(lines, options = []) {
                 const ctx = this.textContext;
-                ctx.clearRect(0, 0, 512, 400);
+                ctx.clearRect(0, 0, 600, 500);
                 
                 // Fondo semi-transparente
-                ctx.fillStyle = 'rgba(26, 26, 46, 0.9)';
-                ctx.fillRect(0, 0, 512, 400);
+                ctx.fillStyle = 'rgba(26, 26, 46, 0.95)';
+                ctx.fillRect(0, 0, 600, 500);
                 
-                // Nombre del NPC
+                // Nombre del NPC con icono
                 ctx.fillStyle = '#4fc3f7';
-                ctx.font = 'bold 24px Arial';
-                ctx.fillText(this.name, 20, 35);
+                ctx.font = 'bold 28px Arial';
+                ctx.fillText('💬 ' + this.name, 20, 40);
                 
                 // Línea separadora
                 ctx.strokeStyle = '#4fc3f7';
-                ctx.lineWidth = 2;
+                ctx.lineWidth = 3;
                 ctx.beginPath();
-                ctx.moveTo(20, 45);
-                ctx.lineTo(492, 45);
+                ctx.moveTo(20, 55);
+                ctx.lineTo(580, 55);
                 ctx.stroke();
                 
                 // Texto principal
                 ctx.fillStyle = '#ffffff';
-                ctx.font = '18px Arial';
-                let y = 75;
+                ctx.font = '20px Arial';
+                let y = 90;
                 lines.forEach(line => {
                     // Word wrap
                     const words = line.split(' ');
                     let currentLine = '';
                     words.forEach(word => {
                         const testLine = currentLine + word + ' ';
-                        if (ctx.measureText(testLine).width > 470) {
+                        if (ctx.measureText(testLine).width > 560) {
                             ctx.fillText(currentLine, 20, y);
                             currentLine = word + ' ';
-                            y += 22;
+                            y += 26;
                         } else {
                             currentLine = testLine;
                         }
                     });
                     ctx.fillText(currentLine, 20, y);
-                    y += 28;
+                    y += 32;
                 });
                 
-                // Opciones
+                // Crear botones VR para las opciones
                 if (options.length > 0) {
-                    y += 10;
-                    ctx.font = '16px Arial';
-                    options.forEach((option, index) => {
-                        ctx.fillStyle = '#ffd54f';
-                        const optionText = `${index + 1}. ${option.substring(0, 50)}${option.length > 50 ? '...' : ''}`;
-                        ctx.fillText(optionText, 25, y);
-                        y += 24;
-                    });
+                    this.createOptionButtons(options);
+                } else {
+                    this.clearVRButtons();
                 }
                 
-                // Instrucción
-                ctx.fillStyle = '#888888';
-                ctx.font = 'italic 14px Arial';
-                ctx.fillText('Apunta y dispara para seleccionar | X para cerrar', 20, 385);
+                // Instrucción para VR
+                ctx.fillStyle = '#aaaaaa';
+                ctx.font = 'bold 16px Arial';
+                ctx.fillText('🎮 VR: Apunta con el controlador y presiona gatillo', 20, 470);
+                ctx.fillText('⌨️ PC: Presiona 1-9 para seleccionar | X para cerrar', 20, 490);
                 
                 this.textTexture.needsUpdate = true;
             }
@@ -1940,7 +2042,7 @@
         function onVRShoot(event) {
             const controller = event.target;
             
-            // Disparar desde el controlador
+            // Preparar raycast desde el controlador
             tempMatrix.identity().extractRotation(controller.matrixWorld);
             const shootDirection = new THREE.Vector3(0, 0, -1);
             shootDirection.applyMatrix4(tempMatrix);
@@ -1948,7 +2050,60 @@
             const shootPosition = new THREE.Vector3();
             shootPosition.setFromMatrixPosition(controller.matrixWorld);
             
-            shoot(shootPosition, shootDirection);
+            raycaster.set(shootPosition, shootDirection);
+            
+            // Primero verificar si estamos apuntando a un botón VR de NPC
+            let vrButtonHit = false;
+            npcs.forEach(npc => {
+                if (!npc.isInteracting || !npc.dialogueGroup.visible) return;
+                
+                // Verificar botón de cerrar
+                if (npc.closeButton) {
+                    const closeIntersects = raycaster.intersectObject(npc.closeButton, true);
+                    if (closeIntersects.length > 0) {
+                        closeNPCDialogue();
+                        vrButtonHit = true;
+                        // Feedback háptico
+                        if (controller.gamepad && controller.gamepad.hapticActuators) {
+                            controller.gamepad.hapticActuators[0]?.pulse(0.5, 100);
+                        }
+                        return;
+                    }
+                }
+                
+                // Verificar botones de opciones
+                npc.vrButtons.forEach(btn => {
+                    const intersects = raycaster.intersectObject(btn, true);
+                    if (intersects.length > 0) {
+                        const optionIndex = btn.userData.optionIndex;
+                        if (optionIndex >= 0) {
+                            npc.handleInteraction(optionIndex);
+                            vrButtonHit = true;
+                            // Feedback háptico
+                            if (controller.gamepad && controller.gamepad.hapticActuators) {
+                                controller.gamepad.hapticActuators[0]?.pulse(0.5, 100);
+                            }
+                        }
+                    }
+                });
+            });
+            
+            // Si no se tocó ningún botón VR, verificar NPC para iniciar interacción
+            if (!vrButtonHit) {
+                const npcIntersects = raycaster.intersectObjects(npcHitboxes, false);
+                if (npcIntersects.length > 0) {
+                    const hitNPC = npcIntersects[0].object.userData.npcInstance;
+                    if (hitNPC && !hitNPC.isInteracting) {
+                        interactWithNPC(hitNPC);
+                        vrButtonHit = true;
+                    }
+                }
+            }
+            
+            // Si no se interactuó con nada del NPC, disparar normalmente
+            if (!vrButtonHit) {
+                shoot(shootPosition, shootDirection);
+            }
         }
         
         function onSelectStart(event) {
@@ -2187,6 +2342,22 @@
             // Resaltar objetos cuando el controlador apunta a ellos
             if (!controller1 && !controller2) return;
             
+            // Resetear color de todos los botones VR primero
+            npcs.forEach(npc => {
+                if (npc.vrButtons) {
+                    npc.vrButtons.forEach(btn => {
+                        if (btn.userData.buttonMesh) {
+                            btn.userData.buttonMesh.material.color.setHex(btn.userData.baseColor);
+                            btn.scale.set(1, 1, 1);
+                        }
+                    });
+                }
+                if (npc.closeButton && npc.closeButton.userData.buttonMesh) {
+                    npc.closeButton.userData.buttonMesh.material.color.setHex(0xff5555);
+                    npc.closeButton.scale.set(1, 1, 1);
+                }
+            });
+            
             [controller1, controller2].forEach(controller => {
                 if (!controller) return;
                 
@@ -2194,19 +2365,43 @@
                 raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
                 raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
                 
+                // Verificar botones VR de NPCs
+                npcs.forEach(npc => {
+                    if (!npc.isInteracting || !npc.dialogueGroup.visible) return;
+                    
+                    // Verificar botón de cerrar
+                    if (npc.closeButton) {
+                        const closeIntersects = raycaster.intersectObject(npc.closeButton, true);
+                        if (closeIntersects.length > 0) {
+                            npc.closeButton.userData.buttonMesh.material.color.setHex(0xff8888);
+                            npc.closeButton.scale.set(1.1, 1.1, 1.1);
+                        }
+                    }
+                    
+                    // Verificar botones de opciones
+                    npc.vrButtons.forEach(btn => {
+                        const intersects = raycaster.intersectObject(btn, true);
+                        if (intersects.length > 0) {
+                            btn.userData.buttonMesh.material.color.setHex(0x5a9edf);
+                            btn.scale.set(1.1, 1.1, 1.1);
+                        }
+                    });
+                });
+                
+                // También resaltar objetos interactivos normales
                 const intersections = raycaster.intersectObjects(interactiveObjects, false);
                 
                 if (intersections.length > 0) {
                     const intersection = intersections[0];
                     const object = intersection.object;
                     
-                    if (object !== selectedObject) {
+                    if (object !== selectedObject && object.material.emissive) {
                         object.material.emissive.setHex(0x333333);
                     }
                 } else {
                     // Remover resaltado de objetos no seleccionados
                     interactiveObjects.forEach(obj => {
-                        if (obj !== selectedObject) {
+                        if (obj !== selectedObject && obj.material.emissive) {
                             obj.material.emissive.setHex(0x000000);
                         }
                     });
