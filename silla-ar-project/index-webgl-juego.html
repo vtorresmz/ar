@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zombie Shooter VR - Supervivencia</title>
+    <title>Demo NPC - Francisca Asistente Virtual</title>
     <style>
         body {
             margin: 0;
@@ -123,28 +123,30 @@
     <div id="container"></div>
     
     <div id="info">
-        <h3>🧟 ZOMBIE SHOOTER 🔫</h3>
+        <h3>💬 DEMO ASISTENTE VIRTUAL</h3>
         <p><strong>Controles PC:</strong></p>
         <ul style="margin: 5px 0; padding-left: 20px;">
             <li>W/A/S/D - Movimiento</li>
-            <li><strong>Shift - CORRER 🏃</strong></li>
-            <li>Mouse - Apuntar</li>
-            <li>Click - Disparar</li>
-            <li>R - Recargar</li>
-            <li>Espacio - Subir/Bajar</li>
+            <li>Shift - Correr</li>
+            <li>Mouse - Mirar</li>
+            <li><strong>E - Hablar con Francisca 💬</strong></li>
+            <li>1-9 - Seleccionar opción</li>
+            <li>X/Esc - Cerrar diálogo</li>
         </ul>
-        <p><strong>VR:</strong> Gatillo para disparar</p>
-        <p id="vrInfo" class="hidden"><strong>Objetivo:</strong> ¡Sobrevive eliminando zombies!</p>
+        <p><strong>VR:</strong> Joystick moverse, Gatillo interactuar</p>
+        <p id="vrInfo" class="hidden"><strong>Acércate a Francisca para conversar</strong></p>
     </div>
     
-    <div id="hud">
+    <!-- HUD oculto - Demo sin zombies -->
+    <div id="hud" style="display: none;">
         <div>🎯 KILLS: <span id="killCount">0</span></div>
         <div>💀 ZOMBIES: <span id="zombieCount">0</span></div>
         <div>🔫 MUNICIÓN: <span id="ammoCount">30</span>/90</div>
         <div>❤️ SALUD: <span id="healthCount">100</span>%</div>
     </div>
     
-    <div id="crosshair"></div>
+    <!-- Crosshair oculto - Demo sin disparos -->
+    <div id="crosshair" style="display: none;"></div>
     
     <div id="controls">
         <button id="vrButton">Entrar en VR</button>
@@ -190,6 +192,420 @@
         let cameraRig; // Grupo que contiene la cámara para mover en VR
         let vrMovementSpeed = 5.0; // Velocidad de movimiento en VR
         let vrRotationSpeed = 1.5; // Velocidad de rotación con joystick derecho
+        
+        // ============================================
+        // SISTEMA NPC ENCAPSULADO
+        // ============================================
+        
+        // Clase NPC reutilizable
+        class NPC {
+            constructor(config) {
+                this.name = config.name || 'NPC';
+                this.modelPath = config.modelPath;
+                this.idleAnimationPath = config.idleAnimationPath;
+                this.interactAnimationPath = config.interactAnimationPath;
+                this.position = config.position || new THREE.Vector3(0, 0, 0);
+                this.scale = config.scale || 0.015;
+                this.dialogues = config.dialogues || {};
+                this.greeting = config.greeting || '¡Hola!';
+                
+                // Estado
+                this.model = null;
+                this.mixer = null;
+                this.idleAnimation = null;
+                this.interactAnimation = null;
+                this.currentAction = null;
+                this.isInteracting = false;
+                this.isLoaded = false;
+                this.interactionDistance = config.interactionDistance || 3.0;
+                
+                // UI de diálogo
+                this.dialogueGroup = null;
+                this.dialoguePanel = null;
+                this.currentDialogueState = 'greeting'; // 'greeting', 'questions', 'answer'
+                this.selectedQuestion = null;
+                
+                // Hitbox para interacción
+                this.hitbox = null;
+            }
+            
+            async load(scene, fbxLoader) {
+                return new Promise((resolve, reject) => {
+                    // Cargar animación idle primero
+                    fbxLoader.load(
+                        this.idleAnimationPath,
+                        (fbx) => {
+                            this.idleAnimation = fbx.animations[0];
+                            console.log(`${this.name}: Idle animation loaded`);
+                            
+                            // Cargar animación de interacción
+                            fbxLoader.load(
+                                this.interactAnimationPath,
+                                (fbx) => {
+                                    this.interactAnimation = fbx.animations[0];
+                                    console.log(`${this.name}: Interact animation loaded`);
+                                    
+                                    // Cargar modelo
+                                    fbxLoader.load(
+                                        this.modelPath,
+                                        (fbx) => {
+                                            this.model = fbx;
+                                            this.model.scale.set(this.scale, this.scale, this.scale);
+                                            
+                                            // Ajustar posición para que los pies estén en el suelo
+                                            const box = new THREE.Box3().setFromObject(this.model);
+                                            this.model.position.copy(this.position);
+                                            this.model.position.y = -box.min.y * this.scale;
+                                            
+                                            // Configurar sombras
+                                            this.model.traverse((child) => {
+                                                if (child.isMesh) {
+                                                    child.castShadow = true;
+                                                    child.receiveShadow = true;
+                                                }
+                                            });
+                                            
+                                            // Crear mixer y reproducir animación idle
+                                            this.mixer = new THREE.AnimationMixer(this.model);
+                                            if (this.idleAnimation) {
+                                                this.currentAction = this.mixer.clipAction(this.idleAnimation);
+                                                this.currentAction.play();
+                                            }
+                                            
+                                            // Crear hitbox para interacción
+                                            this.createHitbox(scene);
+                                            
+                                            // Crear UI de diálogo
+                                            this.createDialogueUI(scene);
+                                            
+                                            scene.add(this.model);
+                                            this.isLoaded = true;
+                                            
+                                            console.log(`${this.name}: Model loaded successfully at`, this.position);
+                                            resolve(this);
+                                        },
+                                        null,
+                                        (error) => {
+                                            console.error(`${this.name}: Error loading model:`, error);
+                                            reject(error);
+                                        }
+                                    );
+                                },
+                                null,
+                                (error) => {
+                                    console.error(`${this.name}: Error loading interact animation:`, error);
+                                    // Continuar sin animación de interacción
+                                    this.loadModelOnly(scene, fbxLoader, resolve, reject);
+                                }
+                            );
+                        },
+                        null,
+                        (error) => {
+                            console.error(`${this.name}: Error loading idle animation:`, error);
+                            this.loadModelOnly(scene, fbxLoader, resolve, reject);
+                        }
+                    );
+                });
+            }
+            
+            loadModelOnly(scene, fbxLoader, resolve, reject) {
+                fbxLoader.load(
+                    this.modelPath,
+                    (fbx) => {
+                        this.model = fbx;
+                        this.model.scale.set(this.scale, this.scale, this.scale);
+                        this.model.position.copy(this.position);
+                        
+                        const box = new THREE.Box3().setFromObject(this.model);
+                        this.model.position.y = -box.min.y * this.scale;
+                        
+                        this.model.traverse((child) => {
+                            if (child.isMesh) {
+                                child.castShadow = true;
+                                child.receiveShadow = true;
+                            }
+                        });
+                        
+                        this.createHitbox(scene);
+                        this.createDialogueUI(scene);
+                        
+                        scene.add(this.model);
+                        this.isLoaded = true;
+                        resolve(this);
+                    },
+                    null,
+                    reject
+                );
+            }
+            
+            createHitbox(scene) {
+                const hitboxGeometry = new THREE.CylinderGeometry(1.0, 1.0, 2.0, 8);
+                const hitboxMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x00ff00,
+                    transparent: true,
+                    opacity: 0.0,
+                    depthWrite: false
+                });
+                this.hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
+                this.hitbox.position.copy(this.position);
+                this.hitbox.position.y = 1.0;
+                this.hitbox.userData.isNPC = true;
+                this.hitbox.userData.npcInstance = this;
+                scene.add(this.hitbox);
+            }
+            
+            createDialogueUI(scene) {
+                this.dialogueGroup = new THREE.Group();
+                this.dialogueGroup.position.copy(this.position);
+                this.dialogueGroup.position.y = 2.2; // Encima de la cabeza
+                this.dialogueGroup.visible = false;
+                
+                // Panel de fondo
+                const panelGeometry = new THREE.PlaneGeometry(2.5, 1.8);
+                const panelMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x1a1a2e,
+                    transparent: true,
+                    opacity: 0.95,
+                    side: THREE.DoubleSide
+                });
+                this.dialoguePanel = new THREE.Mesh(panelGeometry, panelMaterial);
+                this.dialogueGroup.add(this.dialoguePanel);
+                
+                // Borde del panel
+                const borderGeometry = new THREE.EdgesGeometry(panelGeometry);
+                const borderMaterial = new THREE.LineBasicMaterial({ color: 0x4fc3f7 });
+                const border = new THREE.LineSegments(borderGeometry, borderMaterial);
+                this.dialogueGroup.add(border);
+                
+                // Crear canvas para el texto
+                this.textCanvas = document.createElement('canvas');
+                this.textCanvas.width = 512;
+                this.textCanvas.height = 400;
+                this.textContext = this.textCanvas.getContext('2d');
+                
+                this.textTexture = new THREE.CanvasTexture(this.textCanvas);
+                this.textTexture.needsUpdate = true;
+                
+                const textGeometry = new THREE.PlaneGeometry(2.4, 1.7);
+                const textMaterial = new THREE.MeshBasicMaterial({
+                    map: this.textTexture,
+                    transparent: true,
+                    side: THREE.DoubleSide
+                });
+                this.textMesh = new THREE.Mesh(textGeometry, textMaterial);
+                this.textMesh.position.z = 0.01;
+                this.dialogueGroup.add(this.textMesh);
+                
+                scene.add(this.dialogueGroup);
+            }
+            
+            updateDialogueText(lines, options = []) {
+                const ctx = this.textContext;
+                ctx.clearRect(0, 0, 512, 400);
+                
+                // Fondo semi-transparente
+                ctx.fillStyle = 'rgba(26, 26, 46, 0.9)';
+                ctx.fillRect(0, 0, 512, 400);
+                
+                // Nombre del NPC
+                ctx.fillStyle = '#4fc3f7';
+                ctx.font = 'bold 24px Arial';
+                ctx.fillText(this.name, 20, 35);
+                
+                // Línea separadora
+                ctx.strokeStyle = '#4fc3f7';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(20, 45);
+                ctx.lineTo(492, 45);
+                ctx.stroke();
+                
+                // Texto principal
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '18px Arial';
+                let y = 75;
+                lines.forEach(line => {
+                    // Word wrap
+                    const words = line.split(' ');
+                    let currentLine = '';
+                    words.forEach(word => {
+                        const testLine = currentLine + word + ' ';
+                        if (ctx.measureText(testLine).width > 470) {
+                            ctx.fillText(currentLine, 20, y);
+                            currentLine = word + ' ';
+                            y += 22;
+                        } else {
+                            currentLine = testLine;
+                        }
+                    });
+                    ctx.fillText(currentLine, 20, y);
+                    y += 28;
+                });
+                
+                // Opciones
+                if (options.length > 0) {
+                    y += 10;
+                    ctx.font = '16px Arial';
+                    options.forEach((option, index) => {
+                        ctx.fillStyle = '#ffd54f';
+                        const optionText = `${index + 1}. ${option.substring(0, 50)}${option.length > 50 ? '...' : ''}`;
+                        ctx.fillText(optionText, 25, y);
+                        y += 24;
+                    });
+                }
+                
+                // Instrucción
+                ctx.fillStyle = '#888888';
+                ctx.font = 'italic 14px Arial';
+                ctx.fillText('Apunta y dispara para seleccionar | X para cerrar', 20, 385);
+                
+                this.textTexture.needsUpdate = true;
+            }
+            
+            showGreeting() {
+                this.currentDialogueState = 'greeting';
+                this.dialogueGroup.visible = true;
+                this.updateDialogueText(
+                    [this.greeting],
+                    ['Ver preguntas frecuentes']
+                );
+            }
+            
+            showQuestions() {
+                this.currentDialogueState = 'questions';
+                const questionTitles = Object.keys(this.dialogues);
+                this.updateDialogueText(
+                    ['¿En qué puedo ayudarte?'],
+                    questionTitles.slice(0, 8) // Mostrar máximo 8 preguntas
+                );
+            }
+            
+            showAnswer(questionIndex) {
+                const questions = Object.keys(this.dialogues);
+                if (questionIndex >= 0 && questionIndex < questions.length) {
+                    const question = questions[questionIndex];
+                    const answer = this.dialogues[question];
+                    this.currentDialogueState = 'answer';
+                    this.selectedQuestion = question;
+                    this.updateDialogueText(
+                        [question, '', answer],
+                        ['← Volver a preguntas']
+                    );
+                }
+            }
+            
+            handleInteraction(optionIndex) {
+                switch (this.currentDialogueState) {
+                    case 'greeting':
+                        if (optionIndex === 0) {
+                            this.showQuestions();
+                        }
+                        break;
+                    case 'questions':
+                        this.showAnswer(optionIndex);
+                        break;
+                    case 'answer':
+                        if (optionIndex === 0) {
+                            this.showQuestions();
+                        }
+                        break;
+                }
+            }
+            
+            startInteraction() {
+                if (this.isInteracting) return;
+                
+                this.isInteracting = true;
+                
+                // Cambiar a animación de pensar
+                if (this.mixer && this.interactAnimation) {
+                    if (this.currentAction) {
+                        this.currentAction.fadeOut(0.3);
+                    }
+                    this.currentAction = this.mixer.clipAction(this.interactAnimation);
+                    this.currentAction.reset().fadeIn(0.3).play();
+                }
+                
+                this.showGreeting();
+            }
+            
+            endInteraction() {
+                if (!this.isInteracting) return;
+                
+                this.isInteracting = false;
+                this.dialogueGroup.visible = false;
+                
+                // Volver a animación idle
+                if (this.mixer && this.idleAnimation) {
+                    if (this.currentAction) {
+                        this.currentAction.fadeOut(0.3);
+                    }
+                    this.currentAction = this.mixer.clipAction(this.idleAnimation);
+                    this.currentAction.reset().fadeIn(0.3).play();
+                }
+            }
+            
+            update(delta, playerPosition, cameraQuaternion) {
+                if (!this.isLoaded) return;
+                
+                // Actualizar animación
+                if (this.mixer) {
+                    this.mixer.update(delta);
+                }
+                
+                // Calcular distancia al jugador
+                const distance = this.model.position.distanceTo(playerPosition);
+                
+                // Hacer que el NPC mire al jugador cuando está cerca
+                if (distance < this.interactionDistance * 2) {
+                    const direction = new THREE.Vector3();
+                    direction.subVectors(playerPosition, this.model.position);
+                    direction.y = 0;
+                    const angle = Math.atan2(direction.x, direction.z);
+                    this.model.rotation.y = angle;
+                }
+                
+                // Hacer que el diálogo siempre mire a la cámara
+                if (this.dialogueGroup.visible) {
+                    this.dialogueGroup.quaternion.copy(cameraQuaternion);
+                }
+                
+                // Auto-cerrar diálogo si el jugador se aleja
+                if (this.isInteracting && distance > this.interactionDistance * 1.5) {
+                    this.endInteraction();
+                }
+            }
+            
+            checkProximity(playerPosition) {
+                if (!this.isLoaded) return false;
+                const distance = this.model.position.distanceTo(playerPosition);
+                return distance <= this.interactionDistance;
+            }
+        }
+        
+        // Array de NPCs en la escena
+        let npcs = [];
+        let npcHitboxes = [];
+        let currentNPCInteraction = null;
+        
+        // Diálogos de Francisca (FAQ de Duoc UC)
+        const franciscaDialogues = {
+            "¿Modalidad de pago online para matrícula?": "Si eres pre-inscrito, el pago se realiza en admision.duoc.cl. También puedes pagar en el Portal Experiencia Vivo Alumnos o en www2.duoc.cl/portal-de-pagos-en-linea.",
+            "¿Quién puede ser mi sostenedor?": "El sostenedor debe ser mayor de 18 años, tener domicilio en Chile y no tener deudas con Duoc UC. Es el responsable financiero de tus estudios.",
+            "¿Puedo ser mi propio sostenedor?": "Sí. Si tienes entre 18 y 21 años, debes acreditar un ingreso mínimo de $500.000.",
+            "¿Puedo cambiar de sostenedor?": "Sí, mediante un proceso de 'novación'. Debes ir a la sede con el nuevo sostenedor máximo 10 días hábiles antes del fin del periodo.",
+            "¿Debo inscribir ramos al matricularme?": "No. Los alumnos nuevos tienen su horario cargado automáticamente. La inscripción es desde el segundo semestre.",
+            "¿Qué es la Jornada de Inicio?": "Es la semana previa a clases donde conoces docentes, coordinadores, directores y las instalaciones de tu sede.",
+            "¿Modalidades de pago?": "Online: Portal de Alumnos, Banco Santander/Estado/Chile, Webpay. Presencial: Cajas Duoc UC, Caja Vecina, Estado Express.",
+            "¿Puedo cambiarme de carrera?": "Sí, si cumples los requisitos y hay vacantes disponibles.",
+            "¿Dónde veo los aranceles?": "En duoc.cl/oferta-academica/carreras, en la ficha de cada carrera.",
+            "¿Cuál es el periodo de retracto?": "10 días corridos desde la publicación de resultados CRUCH. Ver fechas en demre.cl/calendario/.",
+            "¿Puedo matricularme con DICOM?": "Sí. Duoc UC no solicita informe comercial DICOM."
+        };
+        
+        // ============================================
+        // FIN SISTEMA NPC
+        // ============================================
         
         // Variables del juego
         let zombies = [];
@@ -317,6 +733,9 @@
             
             // Cargar modelo de zombie y luego iniciar el juego
             loadZombieModel();
+            
+            // Crear NPC Francisca
+            createNPCFrancisca();
 
             // Redimensionar ventana
             window.addEventListener('resize', onWindowResize);
@@ -673,24 +1092,19 @@
                             
                             zombieModel = fbx;
                             
-                            // Iniciar spawneo de zombies
-                            setInterval(spawnZombie, ZOMBIE_SPAWN_INTERVAL);
-                            
-                            // Spawn inicial de zombies
-                            for (let i = 0; i < 5; i++) {
-                                setTimeout(() => spawnZombie(), i * 500);
-                            }
+                            // ZOMBIES DESACTIVADOS - Solo Francisca
+                            // setInterval(spawnZombie, ZOMBIE_SPAWN_INTERVAL);
+                            // for (let i = 0; i < 5; i++) {
+                            //     setTimeout(() => spawnZombie(), i * 500);
+                            // }
                         },
                         (xhr) => {
                             console.log('Zombie: ' + (xhr.loaded / xhr.total * 100) + '% loaded');
                         },
                         (error) => {
                             console.error('Error loading zombie model:', error);
-                            console.log('Using primitive zombies as fallback');
-                            setInterval(spawnZombie, ZOMBIE_SPAWN_INTERVAL);
-                            for (let i = 0; i < 5; i++) {
-                                setTimeout(() => spawnZombie(), i * 500);
-                            }
+                            console.log('Zombie model loaded (zombies disabled)');
+                            // ZOMBIES DESACTIVADOS
                         }
                     );
                 },
@@ -699,41 +1113,141 @@
                 },
                 (error) => {
                     console.error('Error loading walking animation:', error);
-                    // Si falla la animación, intentar cargar el zombie sin ella
-                    fbxLoader.load(
-                        'assets/characters/zombie-walk.fbx',
-                        (fbx) => {
-                            console.log('Zombie model loaded (without walking animation)');
-                            fbx.scale.set(0.015, 0.015, 0.015);
-                            const box = new THREE.Box3().setFromObject(fbx);
-                            fbx.position.y = -box.min.y;
-                            
-                            fbx.traverse((child) => {
-                                if (child.isMesh) {
-                                    child.castShadow = true;
-                                    child.receiveShadow = true;
-                                }
-                            });
-                            
-                            zombieModel = fbx;
-                            
-                            setInterval(spawnZombie, ZOMBIE_SPAWN_INTERVAL);
-                            for (let i = 0; i < 5; i++) {
-                                setTimeout(() => spawnZombie(), i * 500);
-                            }
-                        },
-                        null,
-                        (error) => {
-                            console.error('Error loading zombie model:', error);
-                            console.log('Using primitive zombies as fallback');
-                            setInterval(spawnZombie, ZOMBIE_SPAWN_INTERVAL);
-                            for (let i = 0; i < 5; i++) {
-                                setTimeout(() => spawnZombie(), i * 500);
-                            }
-                        }
-                    );
+                    // ZOMBIES DESACTIVADOS - No hacer nada
+                    console.log('Zombies disabled - skipping zombie setup');
                 }
             );
+        }
+        
+        // Función para crear el NPC Francisca
+        async function createNPCFrancisca() {
+            const francisca = new NPC({
+                name: 'Francisca',
+                modelPath: 'assets/characters/megan.fbx',
+                idleAnimationPath: 'assets/characters/saludando.fbx',
+                interactAnimationPath: 'assets/characters/pensar.fbx',
+                position: new THREE.Vector3(0, 0, -4), // Justo frente al jugador
+                scale: 0.015, // Misma escala que el zombie
+                interactionDistance: 4.0,
+                greeting: '¡Hola! Soy Francisca, tu asistente virtual. Cuéntame, ¿cómo puedo ayudarte?',
+                dialogues: franciscaDialogues
+            });
+            
+            try {
+                await francisca.load(scene, fbxLoader);
+                npcs.push(francisca);
+                npcHitboxes.push(francisca.hitbox);
+                
+                // Agregar indicador visual encima del NPC
+                addNPCIndicator(francisca);
+                
+                console.log('✅ NPC Francisca creada exitosamente en posición:', francisca.position);
+            } catch (error) {
+                console.error('❌ Error creando NPC Francisca:', error);
+                // Crear NPC placeholder si falla la carga
+                createPlaceholderNPC(francisca);
+            }
+        }
+        
+        // Agregar indicador flotante encima del NPC
+        function addNPCIndicator(npc) {
+            const indicatorGroup = new THREE.Group();
+            
+            // Icono de chat flotante
+            const iconGeometry = new THREE.SphereGeometry(0.15, 16, 16);
+            const iconMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0x4fc3f7,
+                transparent: true,
+                opacity: 0.9
+            });
+            const icon = new THREE.Mesh(iconGeometry, iconMaterial);
+            indicatorGroup.add(icon);
+            
+            // Signo de exclamación
+            const exclamationGeometry = new THREE.CylinderGeometry(0.03, 0.03, 0.15, 8);
+            const exclamationMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const exclamation = new THREE.Mesh(exclamationGeometry, exclamationMaterial);
+            exclamation.position.y = 0.02;
+            indicatorGroup.add(exclamation);
+            
+            const dotGeometry = new THREE.SphereGeometry(0.03, 8, 8);
+            const dot = new THREE.Mesh(dotGeometry, exclamationMaterial);
+            dot.position.y = -0.1;
+            indicatorGroup.add(dot);
+            
+            indicatorGroup.position.copy(npc.position);
+            indicatorGroup.position.y = 2.5;
+            
+            // Animación de flotación
+            indicatorGroup.userData.baseY = indicatorGroup.position.y;
+            indicatorGroup.userData.isIndicator = true;
+            npc.indicator = indicatorGroup;
+            
+            scene.add(indicatorGroup);
+        }
+        
+        // NPC placeholder si no se puede cargar el modelo
+        function createPlaceholderNPC(npcConfig) {
+            const group = new THREE.Group();
+            
+            // Cuerpo
+            const body = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.3, 0.35, 1.2, 16),
+                new THREE.MeshStandardMaterial({ color: 0x6a5acd, roughness: 0.7 })
+            );
+            body.position.y = 0.6;
+            body.castShadow = true;
+            group.add(body);
+            
+            // Cabeza
+            const head = new THREE.Mesh(
+                new THREE.SphereGeometry(0.25, 16, 16),
+                new THREE.MeshStandardMaterial({ color: 0xffdbac, roughness: 0.8 })
+            );
+            head.position.y = 1.4;
+            head.castShadow = true;
+            group.add(head);
+            
+            // Ojos
+            const eyeGeometry = new THREE.SphereGeometry(0.04, 8, 8);
+            const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x4169e1 });
+            
+            const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+            leftEye.position.set(-0.08, 1.45, 0.2);
+            group.add(leftEye);
+            
+            const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+            rightEye.position.set(0.08, 1.45, 0.2);
+            group.add(rightEye);
+            
+            // Sonrisa
+            const smileGeometry = new THREE.TorusGeometry(0.08, 0.02, 8, 16, Math.PI);
+            const smileMaterial = new THREE.MeshBasicMaterial({ color: 0xff6b6b });
+            const smile = new THREE.Mesh(smileGeometry, smileMaterial);
+            smile.position.set(0, 1.35, 0.2);
+            smile.rotation.x = Math.PI;
+            group.add(smile);
+            
+            // Cabello
+            const hairGeometry = new THREE.SphereGeometry(0.28, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+            const hairMaterial = new THREE.MeshStandardMaterial({ color: 0x8b4513 });
+            const hair = new THREE.Mesh(hairGeometry, hairMaterial);
+            hair.position.y = 1.5;
+            hair.castShadow = true;
+            group.add(hair);
+            
+            group.position.copy(npcConfig.position);
+            npcConfig.model = group;
+            npcConfig.isLoaded = true;
+            
+            npcConfig.createHitbox(scene);
+            npcConfig.createDialogueUI(scene);
+            
+            scene.add(group);
+            npcs.push(npcConfig);
+            npcHitboxes.push(npcConfig.hitbox);
+            
+            console.log('✅ NPC Placeholder creado para', npcConfig.name);
         }
         
         function createZombie(position) {
@@ -947,6 +1461,9 @@
             const playerPosition = new THREE.Vector3();
             camera.getWorldPosition(playerPosition);
             
+            // Actualizar NPCs
+            updateNPCs(delta, playerPosition);
+            
             // Iterar en reversa para evitar problemas al eliminar elementos
             for (let i = zombies.length - 1; i >= 0; i--) {
                 const zombie = zombies[i];
@@ -1033,6 +1550,32 @@
         
         function shoot(fromPosition, direction) {
             if (!canShoot || isReloading || ammo <= 0) return;
+            
+            // Primero verificar si apuntamos a un NPC
+            raycaster.set(fromPosition, direction);
+            const npcIntersects = raycaster.intersectObjects(npcHitboxes, false);
+            
+            if (npcIntersects.length > 0) {
+                const hitNPC = npcIntersects[0].object.userData.npcInstance;
+                if (hitNPC) {
+                    // Calcular qué opción seleccionó basándose en la posición Y del impacto
+                    const hitPoint = npcIntersects[0].point;
+                    const dialogueY = hitNPC.dialogueGroup.position.y;
+                    const relativeY = hitPoint.y - dialogueY;
+                    
+                    // Determinar opción basándose en altura (aproximada)
+                    let optionIndex = 0;
+                    if (hitNPC.currentDialogueState === 'questions') {
+                        // Mapear posición Y a índice de pregunta
+                        const questions = Object.keys(hitNPC.dialogues);
+                        optionIndex = Math.max(0, Math.min(questions.length - 1, 
+                            Math.floor((0.5 - relativeY) * 4)));
+                    }
+                    
+                    interactWithNPC(hitNPC, optionIndex);
+                    return; // No disparar si interactuamos con NPC
+                }
+            }
             
             const currentTime = performance.now() / 1000;
             if (currentTime - lastShootTime < shootCooldown) return;
@@ -1156,6 +1699,45 @@
             const message = `\n\n🧟 GAME OVER 🧟\n\nKills: ${kills}\n\n¡Has sido derrotado!\n\nPresiona OK para recargar`;
             alert(message);
             location.reload();
+        }
+        
+        // Función para actualizar NPCs
+        function updateNPCs(delta, playerPosition) {
+            const cameraQuaternion = new THREE.Quaternion();
+            camera.getWorldQuaternion(cameraQuaternion);
+            
+            const time = performance.now() * 0.001;
+            
+            npcs.forEach(npc => {
+                npc.update(delta, playerPosition, cameraQuaternion);
+                
+                // Animar indicador flotante
+                if (npc.indicator && !npc.isInteracting) {
+                    npc.indicator.position.y = npc.indicator.userData.baseY + Math.sin(time * 2) * 0.1;
+                    npc.indicator.rotation.y += delta * 1.5;
+                    npc.indicator.visible = true;
+                } else if (npc.indicator) {
+                    npc.indicator.visible = false;
+                }
+            });
+        }
+        
+        // Función para manejar interacción con NPC
+        function interactWithNPC(npc, optionIndex = 0) {
+            if (!npc.isInteracting) {
+                npc.startInteraction();
+                currentNPCInteraction = npc;
+            } else {
+                npc.handleInteraction(optionIndex);
+            }
+        }
+        
+        // Función para cerrar diálogo de NPC
+        function closeNPCDialogue() {
+            if (currentNPCInteraction) {
+                currentNPCInteraction.endInteraction();
+                currentNPCInteraction = null;
+            }
         }
         
         function onMouseDown(event) {
@@ -1422,6 +2004,38 @@
                     isRunning = true; 
                     break;
                 case 'KeyR': reload(); break;
+                
+                // Interacción con NPCs
+                case 'KeyE':
+                    // Buscar NPC cercano para interactuar
+                    const playerPos = new THREE.Vector3();
+                    camera.getWorldPosition(playerPos);
+                    
+                    npcs.forEach(npc => {
+                        if (npc.checkProximity(playerPos)) {
+                            if (!npc.isInteracting) {
+                                interactWithNPC(npc);
+                            }
+                        }
+                    });
+                    break;
+                    
+                case 'KeyX':
+                case 'Escape':
+                    closeNPCDialogue();
+                    break;
+                    
+                // Teclas numéricas para seleccionar opciones del diálogo
+                case 'Digit1': if (currentNPCInteraction) currentNPCInteraction.handleInteraction(0); break;
+                case 'Digit2': if (currentNPCInteraction) currentNPCInteraction.handleInteraction(1); break;
+                case 'Digit3': if (currentNPCInteraction) currentNPCInteraction.handleInteraction(2); break;
+                case 'Digit4': if (currentNPCInteraction) currentNPCInteraction.handleInteraction(3); break;
+                case 'Digit5': if (currentNPCInteraction) currentNPCInteraction.handleInteraction(4); break;
+                case 'Digit6': if (currentNPCInteraction) currentNPCInteraction.handleInteraction(5); break;
+                case 'Digit7': if (currentNPCInteraction) currentNPCInteraction.handleInteraction(6); break;
+                case 'Digit8': if (currentNPCInteraction) currentNPCInteraction.handleInteraction(7); break;
+                case 'Digit9': if (currentNPCInteraction) currentNPCInteraction.handleInteraction(8); break;
+                case 'Digit0': if (currentNPCInteraction) currentNPCInteraction.handleInteraction(9); break;
             }
         }
 
