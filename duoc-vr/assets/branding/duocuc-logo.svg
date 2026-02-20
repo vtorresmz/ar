@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 260" role="img" aria-labelledby="title desc">
+  <title id="title">Duoc UC</title>
+  <desc id="desc">Logotipo Duoc UC en color blanco</desc>
+  <g fill="none" fill-rule="evenodd">
+    <g transform="translate(0,18)">
+      <text x="0" y="180" fill="#FFFFFF" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="236" font-weight="900" letter-spacing="-7">DuocUC</text>
+      <text x="940" y="48" fill="#FFFFFF" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="54" font-weight="900">®</text>
+    </g>
+    <g transform="translate(1008,10)">
+      <circle cx="132" cy="120" r="104" stroke="#FFFFFF" stroke-width="8"/>
+      <circle cx="132" cy="120" r="84" stroke="#FFFFFF" stroke-width="4" opacity="0.85"/>
+      <path d="M132 44v152M56 120h152M87 75l90 90M177 75l-90 90" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
+      <text x="132" y="126" text-anchor="middle" fill="#FFFFFF" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="30" font-weight="900">UC</text>
+      <text x="132" y="203" text-anchor="middle" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="700" letter-spacing="1">PONTIFICIA UNIVERSIDAD</text>
+    </g>
+  </g>
+</svg>

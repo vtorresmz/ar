@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EDD - Ambiente Interactivo</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div id="preloadOverlay" aria-live="polite">
+        <div class="preload-content">
+            <img
+                id="preloadLogo"
+                src="assets/branding/duocuc-logo.png"
+                alt="Logo Duoc UC"
+            >
+            <div id="preloadProgress" aria-label="Progreso de carga">
+                <div id="preloadProgressBar">
+                    <div id="preloadProgressFill"></div>
+                </div>
+                <p id="preloadProgressText">Cargando experiencia... 0%</p>
+            </div>
+            <button id="startExperienceButton" type="button" disabled>Iniciar experiencia</button>
+        </div>
+    </div>
+
+    <div id="container"></div>
+    
+    <div id="info">
+        <h3>🎓 CAMPUS VIRTUAL DUOC UC</h3>
+        <p><strong>Controles PC:</strong></p>
+        <ul style="margin: 5px 0; padding-left: 20px;">
+            <li><strong>Click en la pantalla</strong> - Activar vista primera persona</li>
+            <li>W/A/S/D - Movimiento</li>
+            <li>Shift - Correr</li>
+            <li>Mouse - Mirar alrededor</li>
+            <li><strong>🎯 Crosshair aparecerá para apuntar</strong></li>
+            <li><strong>E o Click - Hablar con Francisca 💬</strong></li>
+            <li><strong>Click en botones - Seleccionar respuesta</strong></li>
+            <li>1-9 - También puedes usar teclado</li>
+            <li>X/Esc - Cerrar diálogo o salir de vista</li>
+        </ul>
+        <p><strong>Controles VR (Meta Quest):</strong></p>
+        <ul style="margin: 5px 0; padding-left: 20px;">
+            <li>🎮 Joystick izq. - Caminar</li>
+            <li>🎮 Joystick der. - Girar vista</li>
+            <li>👋 <strong>Verás tus manos virtuales</strong></li>
+            <li>👆 Gatillo - Interactuar con NPCs</li>
+            <li>👆 Apunta y presiona gatillo en los botones</li>
+        </ul>
+        <p id="vrInfo" class="hidden"><strong>🎯 Apunta a Francisca y presiona gatillo para hablar</strong></p>
+    </div>
+    
+    <!-- HUD oculto - No se usa en ambiente educativo -->
+    <div id="hud" style="display: none;">
+        <div>🎯 KILLS: <span id="killCount">0</span></div>
+        <div>💀 ZOMBIES: <span id="zombieCount">0</span></div>
+        <div>🔫 MUNICIÓN: <span id="ammoCount">30</span>/90</div>
+        <div>❤️ SALUD: <span id="healthCount">100</span>%</div>
+    </div>
+    
+    <!-- Crosshair para modo PC -->
+    <div id="crosshair"></div>
+    <div class="crosshair-dot"></div>
+    
+    <div id="controls">
+        <button id="vrButton">🥽 Entrar en Realidad Virtual</button>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
