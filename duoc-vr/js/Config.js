@@ -44,6 +44,7 @@ export const gameState = {
     hand1: null,
     hand2: null,
     currentController: null,
+    vrHeightOffsetY: 0,
     
     // Interacción
     interactiveObjects: [],

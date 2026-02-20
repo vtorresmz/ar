@@ -19,6 +19,10 @@ const TEMP_FORWARD = new THREE.Vector3();
 const TEMP_RIGHT = new THREE.Vector3();
 const TEMP_MOVE = new THREE.Vector3();
 const TEMP_CAMERA_WORLD_POS = new THREE.Vector3();
+const VR_POINTER_LENGTH = 5.0;
+const VR_POINTER_IDLE_COLOR = 0x7ecfff;
+const VR_POINTER_HOVER_COLOR = 0xffd27e;
+const VR_POINTER_IDLE_OPACITY = 0.9;
 
 function isPositionBlockedByWalls(x, z, playerY, radius = PLAYER_COLLISION_RADIUS) {
     const colliders = gameState.wallColliders;
@@ -118,11 +122,12 @@ export function setupVRControllers(renderer, cameraRig) {
     gameState.controller1 = renderer.xr.getController(0);
     gameState.controller1.addEventListener('selectstart', (event) => onVRInteract(event, gameState.scene));
     gameState.controller1.addEventListener('selectend', onSelectEnd);
-    gameState.controller1.addEventListener('connected', function(event) {
-        this.add(buildController(event.data));
+    gameState.controller1.addEventListener('connected', function() {
+        ensureControllerRay(this);
     });
     gameState.controller1.addEventListener('disconnected', function() {
-        this.remove(this.children[0]);
+        const ray = this.getObjectByName('vr-ray');
+        if (ray) this.remove(ray);
     });
     cameraRig.add(gameState.controller1);
     
@@ -130,13 +135,16 @@ export function setupVRControllers(renderer, cameraRig) {
     gameState.controller2 = renderer.xr.getController(1);
     gameState.controller2.addEventListener('selectstart', (event) => onVRInteract(event, gameState.scene));
     gameState.controller2.addEventListener('selectend', onSelectEnd);
-    gameState.controller2.addEventListener('connected', function(event) {
-        this.add(buildController(event.data));
+    gameState.controller2.addEventListener('connected', function() {
+        ensureControllerRay(this);
     });
     gameState.controller2.addEventListener('disconnected', function() {
-        this.remove(this.children[0]);
+        const ray = this.getObjectByName('vr-ray');
+        if (ray) this.remove(ray);
     });
     cameraRig.add(gameState.controller2);
+    ensureControllerRay(gameState.controller1);
+    ensureControllerRay(gameState.controller2);
     
     // Grips para las manos (modelos visuales)
     gameState.controllerGrip1 = renderer.xr.getControllerGrip(0);
@@ -150,21 +158,67 @@ export function setupVRControllers(renderer, cameraRig) {
     cameraRig.add(gameState.controllerGrip2);
 }
 
-function buildController(data) {
+function buildController() {
     let geometry, material;
-    
+
     // Crear línea de raycast para apuntar
     geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, -1], 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute([0.5, 0.5, 0.5, 0, 0, 0], 3));
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, -VR_POINTER_LENGTH], 3));
     
     material = new THREE.LineBasicMaterial({ 
-        vertexColors: true, 
+        color: VR_POINTER_IDLE_COLOR,
+        transparent: true,
+        opacity: VR_POINTER_IDLE_OPACITY,
         blending: THREE.AdditiveBlending,
-        linewidth: 2
+        depthTest: false,
+        depthWrite: false
     });
-    
-    return new THREE.Line(geometry, material);
+
+    const ray = new THREE.Line(geometry, material);
+    ray.name = 'vr-ray';
+    ray.renderOrder = 1200;
+
+    const tip = new THREE.Mesh(
+        new THREE.SphereGeometry(0.018, 10, 10),
+        new THREE.MeshBasicMaterial({
+            color: VR_POINTER_IDLE_COLOR,
+            transparent: true,
+            opacity: 0.9,
+            depthTest: false,
+            depthWrite: false
+        })
+    );
+    tip.position.z = -VR_POINTER_LENGTH;
+    tip.renderOrder = 1201;
+    ray.add(tip);
+    ray.userData.tip = tip;
+
+    return ray;
+}
+
+function ensureControllerRay(controller) {
+    if (!controller) return null;
+    let ray = controller.getObjectByName('vr-ray');
+    if (!ray) {
+        ray = buildController();
+        controller.add(ray);
+    }
+    return ray;
+}
+
+function setControllerRayState(controller, isHovering) {
+    const ray = ensureControllerRay(controller);
+    if (!ray || !ray.material) return;
+
+    const color = isHovering ? VR_POINTER_HOVER_COLOR : VR_POINTER_IDLE_COLOR;
+    ray.material.color.setHex(color);
+    ray.material.opacity = isHovering ? 1.0 : VR_POINTER_IDLE_OPACITY;
+
+    const tip = ray.userData?.tip;
+    if (tip && tip.material) {
+        tip.material.color.setHex(color);
+        tip.material.opacity = isHovering ? 1.0 : 0.9;
+    }
 }
 
 function onVRInteract(event, scene) {
@@ -418,6 +472,7 @@ export function onDesktopMouseLeave() {
 
 export function updateMovement(delta) {
     if (!gameState.experienceStarted) return;
+    if (gameState.renderer && gameState.renderer.xr.isPresenting) return;
     // Movimiento desktop solamente en primera persona bloqueada (Pointer Lock).
     if (!gameState.controls.isLocked) return;
 
@@ -585,6 +640,8 @@ export function highlightIntersections() {
     });
     
     activeControllers.forEach(controller => {
+        let controllerHasHit = false;
+        ensureControllerRay(controller);
         gameState.tempMatrix.identity().extractRotation(controller.matrixWorld);
         gameState.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
         gameState.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(gameState.tempMatrix);
@@ -595,6 +652,7 @@ export function highlightIntersections() {
             if (npc.closeButton) {
                 const closeIntersects = gameState.raycaster.intersectObject(npc.closeButton, true);
                 if (closeIntersects.length > 0) {
+                    controllerHasHit = true;
                     npc.closeButton.userData.buttonMesh.material.opacity = 0.3;
                     npc.closeButton.userData.buttonMesh.material.color.setHex(0xff5555);
                     npc.closeButton.scale.set(1.15, 1.15, 1.15);
@@ -605,13 +663,20 @@ export function highlightIntersections() {
             npc.vrButtons.forEach(btn => {
                 const intersects = gameState.raycaster.intersectObject(btn, true);
                 if (intersects.length > 0) {
+                    controllerHasHit = true;
                     btn.userData.buttonMesh.material.opacity = 0.25;
                     btn.userData.buttonMesh.material.color.setHex(0x7ecfff);
                     btn.scale.set(1.08, 1.08, 1.08);
                 }
             });
         });
-        
+
+        const npcBodyIntersections = gameState.raycaster.intersectObjects(gameState.npcHitboxes, false);
+        if (npcBodyIntersections.length > 0) {
+            controllerHasHit = true;
+        }
+
+        setControllerRayState(controller, controllerHasHit);
     });
 
     // Resaltar objetos interactivos normales una sola vez (evita duplicar raycasts por controlador)
@@ -633,6 +698,7 @@ export function highlightIntersections() {
             if (object !== gameState.selectedObject && object.material.emissive) {
                 object.material.emissive.setHex(0x333333);
             }
+            setControllerRayState(primaryController, true);
         }
     }
 }

@@ -28,6 +28,9 @@ const VR_HIGHLIGHT_INTERVAL_MS = 22; // ~45 Hz
 const DEBUG_COORDS_ENABLED = true;
 const DEBUG_COORDS_UPDATE_INTERVAL_MS = 120;
 const PLAYER_START_Y = 4.33;
+const VR_FALLBACK_EYE_HEIGHT = 1.62;
+const VR_MIN_TRACKED_EYE_HEIGHT = 0.35;
+const VR_HEIGHT_FALLBACK_LERP = 0.22;
 
 let lastHighlightUpdateTime = 0;
 let lastDebugCoordsUpdateTime = 0;
@@ -85,6 +88,23 @@ function getTargetPixelRatio() {
     return gameState.renderer && gameState.renderer.xr.isPresenting
         ? Math.min(window.devicePixelRatio, VR_MAX_PIXEL_RATIO)
         : Math.min(window.devicePixelRatio, DESKTOP_MAX_PIXEL_RATIO);
+}
+
+function applyVRHeightFallback() {
+    if (!gameState.renderer || !gameState.renderer.xr.isPresenting) return;
+    if (!gameState.cameraRig || !gameState.camera) return;
+
+    const trackedEyeY = gameState.camera.position.y;
+    if (!Number.isFinite(trackedEyeY)) return;
+
+    const targetOffsetY = trackedEyeY < VR_MIN_TRACKED_EYE_HEIGHT
+        ? Math.max(0, VR_FALLBACK_EYE_HEIGHT - trackedEyeY)
+        : 0;
+
+    const currentOffsetY = Number.isFinite(gameState.vrHeightOffsetY) ? gameState.vrHeightOffsetY : 0;
+    const nextOffsetY = THREE.MathUtils.lerp(currentOffsetY, targetOffsetY, VR_HEIGHT_FALLBACK_LERP);
+    gameState.vrHeightOffsetY = nextOffsetY;
+    gameState.cameraRig.position.y = nextOffsetY;
 }
 
 function ensureDebugCoordsOverlay() {
@@ -184,6 +204,12 @@ function init() {
     // Sombras desactivadas para priorizar rendimiento estable en desktop/VR.
     gameState.renderer.shadowMap.enabled = false;
     gameState.renderer.xr.enabled = true;
+    // En VR, priorizar referencia de piso real para evitar iniciar "pegado al suelo".
+    try {
+        gameState.renderer.xr.setReferenceSpaceType('local-floor');
+    } catch (error) {
+        console.warn('No se pudo activar referencia local-floor en XR, se usará fallback:', error);
+    }
     document.getElementById('container').appendChild(gameState.renderer.domElement);
 
     // Configurar VR Button
@@ -246,6 +272,16 @@ function init() {
 
     // Detectar cuando entramos en VR
     gameState.renderer.xr.addEventListener('sessionstart', () => {
+        if (gameState.controls && gameState.controls.isLocked) {
+            gameState.controls.unlock();
+        }
+        gameState.vrHeightOffsetY = 0;
+        if (gameState.cameraRig) {
+            gameState.cameraRig.position.y = 0;
+        }
+        if (gameState.camera) {
+            gameState.camera.position.y = 0;
+        }
         gameState.renderer.setPixelRatio(getTargetPixelRatio());
         gameState.renderer.setSize(window.innerWidth, window.innerHeight, false);
         document.getElementById('info').classList.add('hidden');
@@ -255,6 +291,13 @@ function init() {
     });
 
     gameState.renderer.xr.addEventListener('sessionend', () => {
+        gameState.vrHeightOffsetY = 0;
+        if (gameState.cameraRig) {
+            gameState.cameraRig.position.y = 0;
+        }
+        if (gameState.camera) {
+            gameState.camera.position.y = PLAYER_START_Y;
+        }
         gameState.renderer.setPixelRatio(getTargetPixelRatio());
         gameState.renderer.setSize(window.innerWidth, window.innerHeight, false);
         document.getElementById('info').classList.remove('hidden');
@@ -277,6 +320,7 @@ function animate() {
         const delta = (time - gameState.prevTime) / 1000;
 
         if (gameState.experienceStarted) {
+            applyVRHeightFallback();
             updateMovement(delta);
             updateVRMovement(delta); // Movimiento con joysticks en VR
             gameState.camera.getWorldPosition(playerWorldPosition);
