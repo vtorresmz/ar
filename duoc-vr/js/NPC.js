@@ -19,7 +19,7 @@ export class NPC {
         this.dialogueUIConfig = config.dialogueUIConfig || {};
         // AJUSTE HITBOX NPC: valores editables por personaje.
         this.hitboxRadius = config.hitboxRadius || 0.60;
-        this.hitboxHeight = config.hitboxHeight || 2.10;
+        this.hitboxHeight = config.hitboxHeight || 5.10;
         this.hitboxOffsetY = Number.isFinite(config.hitboxOffsetY)
             ? config.hitboxOffsetY
             : this.hitboxHeight / 2;

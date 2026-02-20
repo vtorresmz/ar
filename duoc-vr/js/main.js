@@ -27,6 +27,7 @@ const DESKTOP_HIGHLIGHT_INTERVAL_MS = 33; // ~30 Hz
 const VR_HIGHLIGHT_INTERVAL_MS = 22; // ~45 Hz
 const DEBUG_COORDS_ENABLED = true;
 const DEBUG_COORDS_UPDATE_INTERVAL_MS = 120;
+const PLAYER_START_Y = 4.33;
 
 let lastHighlightUpdateTime = 0;
 let lastDebugCoordsUpdateTime = 0;
@@ -174,7 +175,7 @@ function init() {
     gameState.cameraRig.add(gameState.camera);
     gameState.scene.add(gameState.cameraRig);
     gameState.cameraRig.position.set(0, 0, 0); // El rig está en el suelo
-    gameState.camera.position.set(0, 1.6, 0); // Altura de ojos relativa al rig
+    gameState.camera.position.set(0, PLAYER_START_Y, 0); // Altura inicial solicitada para vista de usuario
 
     // Crear renderer con soporte WebXR
     gameState.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });

@@ -48,8 +48,9 @@ export async function createNPCFrancisca(scene, fbxLoader) {
         hitboxRadius: FRANCISCA_HITBOX_RADIUS,
         hitboxHeight: FRANCISCA_HITBOX_HEIGHT,
         hitboxOffsetY: FRANCISCA_HITBOX_OFFSET_Y,
-        showHitbox: true,
-        showDialogueHitbox: true,
+        // Francisca: ocultar hitbox de cuerpo y de dialogo (modo no-debug).
+        showHitbox: false,
+        showDialogueHitbox: false,
         interactionDistance: 4.0,
         greeting: '¡Hola! Soy Francisca, tu asistente virtual. Cuéntame, ¿cómo puedo ayudarte?',
         dialogues: franciscaDialogues
@@ -83,6 +84,7 @@ export async function createNPCRemy(scene, fbxLoader) {
         scale: REMY_SCALE,
         // Remy usa la misma UI de diálogo (NPCDialogueUI) que Francisca.
         interactionDistance: 4.0,
+        // Remy: hitbox oculto (sigue existiendo para interacción).
         showHitbox: false,
         showDialogueHitbox: false,
         greeting: 'Hola, soy Remy. Estas son preguntas demo sobre salas de clases y uso de computadores.',

@@ -66,6 +66,19 @@ const OFFICE_BASE_ROTATION_Z = 0.0;
 // Mueve el bloque completo en el mundo para alinearlo con Francisca.
 const OFFICE_BASE_OFFSET_X = 0.0;
 const OFFICE_BASE_OFFSET_Z = -4.0;
+// AJUSTE CUADRO/IMAGEN: posicion y orientacion del marco vacio para futura imagen.
+const WALL_FRAME_POSITION = new THREE.Vector3(-23.57, 4.33, -7.48);
+const WALL_FRAME_ROTATION_Y_DEG = -92.5;
+const WALL_FRAME_OUTER_WIDTH = 2.0;
+const WALL_FRAME_OUTER_HEIGHT = 1.2;
+const WALL_FRAME_BORDER = 0.08;
+const WALL_FRAME_DEPTH = 0.05;
+// Slots de cuadros:
+// 0 = cuadro base, negativos hacia la derecha (-1,-2,-3), positivos hacia la izquierda (1,2,3).
+const WALL_FRAME_SLOT_INDICES = [0, -1, -2, -3, 1, 2, 3];
+const WALL_FRAME_HORIZONTAL_GAP = 0.28;
+const WALL_FRAME_HORIZONTAL_STEP = WALL_FRAME_OUTER_WIDTH + WALL_FRAME_HORIZONTAL_GAP;
+const WALL_FRAME_SHOW_SLOT_LABELS = true;
 
 function setupTiledTexture(texture, repeatX, repeatY) {
     texture.wrapS = THREE.RepeatWrapping;
@@ -292,8 +305,130 @@ export function createRoom(scene, loadingManager = undefined) {
 
     // Planta completa tipo oficina con vanos y puertas operables.
     addCompleteOfficePlan(scene, wallMaterial, loadingManager);
+    addEmptyWallFrames(scene);
 
     // Sin líneas artificiales en esquinas para mantener look arquitectónico realista
+}
+
+function addEmptyWallFrames(scene) {
+    const yaw = THREE.MathUtils.degToRad(WALL_FRAME_ROTATION_Y_DEG);
+    const localRight = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    gameState.imageFrameAnchors = new Map();
+
+    WALL_FRAME_SLOT_INDICES.forEach((slotIndex) => {
+        const offset = slotIndex * WALL_FRAME_HORIZONTAL_STEP;
+        const framePosition = WALL_FRAME_POSITION.clone().addScaledVector(localRight, offset);
+        const frameGroup = createEmptyWallFrame(slotIndex);
+        frameGroup.position.copy(framePosition);
+        frameGroup.rotation.y = yaw;
+        scene.add(frameGroup);
+        const anchor = frameGroup.getObjectByName(`empty-image-anchor-${slotIndex}`);
+        if (anchor) {
+            gameState.imageFrameAnchors.set(slotIndex, anchor);
+        }
+    });
+}
+
+function createEmptyWallFrame(slotIndex) {
+    const frameGroup = new THREE.Group();
+    frameGroup.name = `empty-image-frame-${slotIndex}`;
+    frameGroup.userData.frameSlot = slotIndex;
+
+    const frameMaterial = new THREE.MeshStandardMaterial({
+        color: 0x232323,
+        roughness: 0.5,
+        metalness: 0.22
+    });
+
+    const outerW = WALL_FRAME_OUTER_WIDTH;
+    const outerH = WALL_FRAME_OUTER_HEIGHT;
+    const border = WALL_FRAME_BORDER;
+    const depth = WALL_FRAME_DEPTH;
+    const innerW = Math.max(0.2, outerW - border * 2);
+    const innerH = Math.max(0.2, outerH - border * 2);
+
+    const topBar = new THREE.Mesh(new THREE.BoxGeometry(outerW, border, depth), frameMaterial);
+    topBar.position.set(0, (outerH - border) * 0.5, 0);
+    frameGroup.add(topBar);
+
+    const bottomBar = new THREE.Mesh(new THREE.BoxGeometry(outerW, border, depth), frameMaterial);
+    bottomBar.position.set(0, -(outerH - border) * 0.5, 0);
+    frameGroup.add(bottomBar);
+
+    const leftBar = new THREE.Mesh(new THREE.BoxGeometry(border, innerH, depth), frameMaterial);
+    leftBar.position.set(-(outerW - border) * 0.5, 0, 0);
+    frameGroup.add(leftBar);
+
+    const rightBar = new THREE.Mesh(new THREE.BoxGeometry(border, innerH, depth), frameMaterial);
+    rightBar.position.set((outerW - border) * 0.5, 0, 0);
+    frameGroup.add(rightBar);
+
+    // Ancla invisible para poner una imagen despues (map de textura).
+    const imageAnchor = new THREE.Mesh(
+        new THREE.PlaneGeometry(innerW, innerH),
+        new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.0,
+            side: THREE.DoubleSide,
+            depthWrite: false
+        })
+    );
+    imageAnchor.name = `empty-image-anchor-${slotIndex}`;
+    imageAnchor.position.z = depth * 0.52;
+    frameGroup.add(imageAnchor);
+
+    if (WALL_FRAME_SHOW_SLOT_LABELS) {
+        const label = createWallFrameSlotLabel(slotIndex);
+        label.position.set(0, outerH * 0.62, depth * 0.55);
+        frameGroup.add(label);
+    }
+
+    frameGroup.traverse((node) => {
+        if (!node.isMesh) return;
+        node.castShadow = false;
+        node.receiveShadow = false;
+    });
+    return frameGroup;
+}
+
+function createWallFrameSlotLabel(slotIndex) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 96;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        return new THREE.Mesh(
+            new THREE.PlaneGeometry(0.42, 0.16),
+            new THREE.MeshBasicMaterial({ color: 0xffffff })
+        );
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.64)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = 'rgba(125, 207, 255, 0.85)';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(2, 2, canvas.width - 4, canvas.height - 4);
+    ctx.font = 'bold 56px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#dff4ff';
+    ctx.fillText(String(slotIndex), canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+
+    const material = new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        side: THREE.DoubleSide,
+        depthWrite: false
+    });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.16), material);
+    mesh.name = `frame-slot-label-${slotIndex}`;
+    return mesh;
 }
 
 function addCompleteOfficePlan(scene, wallMaterial, loadingManager) {
